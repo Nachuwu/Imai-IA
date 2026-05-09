@@ -3,6 +3,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Si se define FFMPEG_BIN en .env, lo agrega al PATH del proceso actual
+_ffmpeg_bin = os.getenv("FFMPEG_BIN", "")
+if _ffmpeg_bin and _ffmpeg_bin not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _ffmpeg_bin + os.pathsep + os.environ.get("PATH", "")
+
 MODEL        = os.getenv("MODEL",        "mistral")
 VOZ          = os.getenv("VOZ",          "es-CL-LorenzoNeural")
 
@@ -12,5 +17,5 @@ UMBRAL_RMS   = int(os.getenv("UMBRAL_RMS",   "300"))
 SILENCIO_MAX = float(os.getenv("SILENCIO_MAX", "1.5"))
 DURACION_MAX = int(os.getenv("DURACION_MAX",  "15"))
 
-AUDIO_FILE   = "respuesta.mp3"
-TEMP_WAV     = "temp.wav"
+AUDIO_FILE   = "audio/respuesta.mp3"
+TEMP_WAV     = "audio/temp.wav"

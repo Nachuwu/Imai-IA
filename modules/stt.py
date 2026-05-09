@@ -4,15 +4,18 @@ import scipy.io.wavfile as wav
 from faster_whisper import WhisperModel
 from config import SAMPLE_RATE, CHUNK, SILENCIO_MAX, DURACION_MAX, UMBRAL_RMS, TEMP_WAV
 
-print("Cargando Whisper...")
-model = WhisperModel("medium", device="cpu", compute_type="int8")
-print("Whisper listo.")
+model = None
+
+def inicializar():
+    global model
+    print("Cargando Whisper...")
+    model = WhisperModel("small", device="cpu", compute_type="int8")
+    print("Whisper listo.\n")
 
 def _rms(chunk):
     return np.sqrt(np.mean(chunk.astype(np.float32) ** 2))
 
 def escuchar():
-    print("Escuchando... (habla cuando quieras)")
     chunk_samples       = int(CHUNK * SAMPLE_RATE)
     chunks_silencio_max = int(SILENCIO_MAX / CHUNK)
     chunks_max          = int(DURACION_MAX / CHUNK)
@@ -21,6 +24,7 @@ def escuchar():
     chunks_silencio = 0
     frames          = []
 
+    print("[ Escuchando... ]", flush=True)
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             for _ in range(chunks_max):
@@ -30,7 +34,7 @@ def escuchar():
                 if not grabando:
                     if energia > UMBRAL_RMS:
                         grabando = True
-                        print("Voz detectada...")
+                        print("\a[ ● Grabando ]", flush=True)
                         frames.append(chunk)
                 else:
                     frames.append(chunk)
@@ -41,18 +45,19 @@ def escuchar():
                     else:
                         chunks_silencio = 0
     except sd.PortAudioError as e:
-        print(f"Error de micrófono: {e}")
+        print(f"[ Error de micrófono: {e} ]")
         return ""
 
     if not frames:
-        print("No se detectó voz.")
+        print("[ Sin voz detectada ]")
         return ""
 
+    print("[ ■ Procesando... ]", flush=True)
     audio = np.concatenate(frames, axis=0)
     try:
         wav.write(TEMP_WAV, SAMPLE_RATE, audio)
         segments, _ = model.transcribe(TEMP_WAV, language="es")
         return " ".join([s.text for s in segments]).strip()
     except Exception as e:
-        print(f"Error al transcribir: {e}")
+        print(f"[ Error al transcribir: {e} ]")
         return ""
