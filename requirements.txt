@@ -1,0 +1,7 @@
+ollama
+sounddevice
+scipy
+numpy
+faster-whisper
+edge-tts
+python-dotenv
