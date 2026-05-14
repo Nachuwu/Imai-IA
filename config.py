@@ -8,8 +8,10 @@ _ffmpeg_bin = os.getenv("FFMPEG_BIN", "")
 if _ffmpeg_bin and _ffmpeg_bin not in os.environ.get("PATH", ""):
     os.environ["PATH"] = _ffmpeg_bin + os.pathsep + os.environ.get("PATH", "")
 
-MODEL        = os.getenv("MODEL",        "mistral")
-VOZ          = os.getenv("VOZ",          "es-CL-LorenzoNeural")
+MODEL         = os.getenv("MODEL",         "mistral")
+GROQ_API_KEY  = os.getenv("GROQ_API_KEY",  "")
+CIUDAD        = os.getenv("CIUDAD",        "Santiago")
+VOZ           = os.getenv("VOZ",           "es-CL-LorenzoNeural")
 
 SAMPLE_RATE  = 16000
 CHUNK        = 0.3

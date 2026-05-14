@@ -5,3 +5,13 @@ numpy
 faster-whisper
 edge-tts
 python-dotenv
+groq
+rapidfuzz
+pycaw
+comtypes
+requests
+pyperclip
+pillow
+plyer
+screen-brightness-control
+pyttsx3

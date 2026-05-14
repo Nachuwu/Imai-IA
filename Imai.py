@@ -1,13 +1,19 @@
 import re
 import sys
+import time
 import queue
 import subprocess
 import threading
 import ollama
-from modules.stt import escuchar, inicializar as inicializar_stt
-from modules.tts import hablar
+from modules.stt import escuchar, inicializar as inicializar_stt, esta_pausado, pausar as pausar_micro
+from modules.tts import hablar, fue_interrumpido
 from modules.prompt import SYSTEM_PROMPT
-from config import MODEL
+from modules.intent import detectar
+import modules.apps as apps
+import modules.tools as tools
+import modules.urls as urls
+import modules.historial as log
+from config import MODEL, CIUDAD
 
 MAX_TURNOS  = 10
 _RE_ORACION = re.compile(r'(?<=[.!?])\s+')
@@ -34,14 +40,119 @@ def _limpiar_markdown(texto):
     texto = re.sub(r'^\s*\d+\.\s+',  '',    texto, flags=re.MULTILINE)
     return texto.strip()
 
+def manejar_herramienta(texto):
+    """
+    Evalúa si el texto es un comando de herramienta.
+    Retorna True si lo manejó, False si debe ir al LLM.
+    """
+    intent, objeto = detectar(texto)
+
+    if intent == "abrir":
+        key = apps.abrir(objeto or "")
+        hablar(f"Abriendo {key}." if key else f"No encontré {objeto}.")
+        return True
+
+    if intent == "cerrar":
+        key = apps.cerrar(objeto or "")
+        hablar(f"Cerrando {key}." if key else f"No encontré {objeto} ejecutándose.")
+        return True
+
+    if intent == "volumen":
+        if isinstance(objeto, int):
+            hablar(tools.set_volumen(objeto))
+        elif objeto == "subir":
+            hablar(tools.subir_volumen())
+        elif objeto == "bajar":
+            hablar(tools.bajar_volumen())
+        elif objeto == "silenciar":
+            hablar(tools.silenciar())
+        elif objeto == "activar":
+            hablar(tools.activar_sonido())
+        else:
+            hablar(tools.get_volumen())
+        return True
+
+    if intent == "timer":
+        if objeto:
+            def _cb_timer(msg):
+                tools.notificar("Imai — Timer", msg)
+                hablar(msg)
+            hablar(tools.crear_timer(objeto, _cb_timer))
+        else:
+            hablar("¿De cuántos segundos o minutos el timer?")
+        return True
+
+    if intent == "buscar":
+        hablar(f"Buscando {objeto}.")
+        tools.buscar_archivos(objeto or "", callback=hablar)
+        return True
+
+    if intent == "hora":
+        hablar(tools.get_hora())
+        return True
+
+    if intent == "fecha":
+        hablar(tools.get_fecha())
+        return True
+
+    if intent == "clima":
+        ciudad = objeto or CIUDAD
+        hablar(tools.get_clima(ciudad))
+        return True
+
+    if intent == "calcular":
+        if objeto:
+            resultado = tools.calcular(objeto)
+            hablar(f"{resultado}." if resultado else "No pude calcular eso.")
+        else:
+            hablar("¿Qué quieres calcular?")
+        return True
+
+    if intent == "portapapeles":
+        hablar(tools.get_portapapeles())
+        return True
+
+    if intent == "captura":
+        hablar(tools.captura_pantalla())
+        return True
+
+    if intent == "spotify":
+        if objeto == "siguiente":    respuesta = tools.spotify_siguiente()
+        elif objeto == "anterior":   respuesta = tools.spotify_anterior()
+        elif objeto == "pausa":      respuesta = tools.spotify_play_pause()
+        elif objeto == "parar":      respuesta = tools.spotify_parar()
+        elif objeto == "que_suena":  respuesta = tools.get_cancion_spotify()
+        else:                        respuesta = tools.spotify_play_pause()
+        hablar(respuesta)
+        return True
+
+    if intent == "brillo":
+        if isinstance(objeto, int):   hablar(tools.set_brillo(objeto))
+        elif objeto == "subir":       hablar(tools.subir_brillo())
+        elif objeto == "bajar":       hablar(tools.bajar_brillo())
+        else:                         hablar(tools.get_brillo())
+        return True
+
+    if intent == "url":
+        hablar(urls.manejar(objeto or texto))
+        return True
+
+    if intent == "no_molestar":
+        if objeto:
+            pausar_micro(objeto)
+            def _reanudar(msg):
+                hablar("Ya puedes hablarme.")
+            tools.crear_timer(objeto, _reanudar)
+            hablar(f"De acuerdo, silencio por {tools._fmt_tiempo(objeto)}.")
+        else:
+            hablar("¿Por cuánto tiempo?")
+        return True
+
+    return False
+
 def _consultar_ollama(historial):
-    """
-    Streaming con pipeline de oraciones:
-    - Hilo principal: recibe chunks de Ollama y los muestra en pantalla.
-    - Hilo reproductor: toma oraciones completas de la cola y las habla.
-    Ambos corren en paralelo — el audio empieza en cuanto termina la primera oración.
-    """
-    cola = queue.Queue()
+    cola         = queue.Queue()
+    interrumpido = threading.Event()
 
     def _reproductor():
         while True:
@@ -49,6 +160,14 @@ def _consultar_ollama(historial):
             if oracion is None:
                 break
             hablar(oracion)
+            if fue_interrumpido():
+                interrumpido.set()
+                while True:
+                    try:
+                        cola.get_nowait()
+                    except queue.Empty:
+                        break
+                break
 
     hilo = threading.Thread(target=_reproductor, daemon=True)
     hilo.start()
@@ -60,12 +179,14 @@ def _consultar_ollama(historial):
     try:
         for chunk in ollama.chat(model=MODEL, messages=historial, stream=True,
                                   options={"num_ctx": 1024, "num_predict": 200}):
+            if interrumpido.is_set():
+                break
+
             parte = chunk["message"]["content"]
             buffer         += parte
             texto_completo += parte
             print(parte, end="", flush=True)
 
-            # Extraer oraciones completas y enviarlas a la cola TTS
             while True:
                 m = _RE_ORACION.search(buffer)
                 if not m:
@@ -82,11 +203,10 @@ def _consultar_ollama(historial):
 
     print()
 
-    # Hablar el texto restante (última oración sin punto final, etc.)
-    if buffer.strip():
+    if buffer.strip() and not interrumpido.is_set():
         cola.put(_limpiar_markdown(buffer.strip()))
 
-    cola.put(None)  # señal de fin al hilo reproductor
+    cola.put(None)
     hilo.join()
 
     return _limpiar_markdown(texto_completo)
@@ -101,12 +221,16 @@ def main():
     print()
 
     inicializar_stt()
+    apps.escanear_en_segundo_plano()
 
     historial = [{"role": "system", "content": SYSTEM_PROMPT}]
     hablar("Hola, soy Imai. Listo para ayudarte.")
 
     while True:
         try:
+            if esta_pausado():
+                time.sleep(0.5)
+                continue
             texto = escuchar()
         except KeyboardInterrupt:
             hablar("Hasta luego.")
@@ -120,6 +244,12 @@ def main():
             hablar("Hasta luego.")
             break
 
+        # Herramientas primero — si matchea no va al LLM
+        intent, _ = detectar(texto)
+        if manejar_herramienta(texto):
+            log.registrar(texto, intent, "")
+            continue
+
         historial = _truncar_historial(historial)
         historial.append({"role": "user", "content": texto})
 
@@ -131,7 +261,13 @@ def main():
             historial.pop()
             continue
 
+        if fue_interrumpido():
+            historial.pop()
+            hablar("Okay.")
+            continue
+
         historial.append({"role": "assistant", "content": respuesta})
+        log.registrar(texto, "llm", respuesta)
 
 if __name__ == "__main__":
     try:
