@@ -3,5 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 apps_cache.json
-historial.json
+historial/
+chroma_db/
+memoria.json
 audio/temp.wav

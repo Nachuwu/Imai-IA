@@ -12,6 +12,8 @@ MODEL         = os.getenv("MODEL",         "mistral")
 GROQ_API_KEY  = os.getenv("GROQ_API_KEY",  "")
 CIUDAD        = os.getenv("CIUDAD",        "Santiago")
 VOZ           = os.getenv("VOZ",           "es-CL-LorenzoNeural")
+PIPER_MODEL   = os.getenv("PIPER_MODEL",   "")   # ruta al .onnx de Piper
+WAKE_WORD     = os.getenv("WAKE_WORD",     "1")   # "0" para desactivar
 
 SAMPLE_RATE  = 16000
 CHUNK        = 0.3

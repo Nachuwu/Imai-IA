@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import time
 import logging
 import warnings
 import subprocess
@@ -9,7 +10,7 @@ import unicodedata
 import numpy as np
 import sounddevice as sd
 import edge_tts
-from config import VOZ, AUDIO_FILE
+from config import VOZ, AUDIO_FILE, PIPER_MODEL
 
 
 def _sin_acentos(texto):
@@ -38,7 +39,9 @@ def hablar(texto):
     )
     hilo_monitor.start()
 
-    if shutil.which("ffplay"):
+    if PIPER_MODEL:
+        _hablar_piper(texto)
+    elif shutil.which("ffplay"):
         try:
             asyncio.run(_streaming(texto))
         except Exception as e:
@@ -48,6 +51,22 @@ def hablar(texto):
         _hablar_archivo(texto)
 
     evento_fin.set()
+
+def _hablar_piper(texto):
+    try:
+        from piper.voice import PiperVoice
+        voice = PiperVoice.load(PIPER_MODEL)
+        audio = b"".join(voice.synthesize_stream_raw(texto))
+        arr = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+        sd.play(arr, samplerate=voice.config.sample_rate)
+        while sd.get_stream().active:
+            if _evento_interrupcion.is_set():
+                sd.stop()
+                return
+            time.sleep(0.05)
+    except Exception as e:
+        print(f"[ Piper falló: {e} ]")
+        _hablar_archivo(texto)
 
 def _hablar_archivo(texto):
     try:

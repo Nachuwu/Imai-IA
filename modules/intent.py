@@ -58,6 +58,8 @@ _PATRONES = {
                     r"(pone?|reproduce|toca|ponme|reproducir).{1,50} en youtube|"
                     r"(quiero escuchar|escuchar).{1,50} en youtube)\b",
     "no_molestar":  r"\b(no molestar|modo silencio|silencio por|desactiva (el )?micro|para de escuchar)\b",
+    "cancelar_timer": r"\b(cancela|cancelar|para|detener|quitar)\b.{0,20}\b(timer|alarma|cronometro)\b",
+    "memoria": r"\b(recuerda|anota|guarda|ten en cuenta|sab[eé]s que|nota que)\b",
     "timer":  rf"\b(timer|alarma|cronometro|av[íi]same|recu[eé]rdame|"
               rf"pon(me)? un (timer|alarma)|crea(me)? (un )?(timer)|"
               rf"{_NUMEROS_PAT}\s*(minutos?|segundos?|horas?))\b",
@@ -79,7 +81,7 @@ _STOPWORDS = {
     "aplicacion", "aplicaciones", "programa", "programas", "app",
 }
 
-_INTENTS_VALIDOS = set(_PATRONES.keys()) | {"ninguna"}
+_INTENTS_VALIDOS = set(_PATRONES.keys()) | {"ninguna", "cancelar_timer", "memoria"}
 
 
 def detectar(texto):

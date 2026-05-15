@@ -15,3 +15,6 @@ pillow
 plyer
 screen-brightness-control
 pyttsx3
+piper-tts
+chromadb
+sentence-transformers

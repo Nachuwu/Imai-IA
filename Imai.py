@@ -5,7 +5,7 @@ import queue
 import subprocess
 import threading
 import ollama
-from modules.stt import escuchar, inicializar as inicializar_stt, esta_pausado, pausar as pausar_micro
+from modules.stt import escuchar, inicializar as inicializar_stt, esta_pausado, pausar as pausar_micro, esperar_wake_word
 from modules.tts import hablar, fue_interrumpido
 from modules.prompt import SYSTEM_PROMPT
 from modules.intent import detectar
@@ -13,10 +13,23 @@ import modules.apps as apps
 import modules.tools as tools
 import modules.urls as urls
 import modules.historial as log
-from config import MODEL, CIUDAD
+import modules.memoria as memoria
+from modules.rag import indexar_historial, buscar as rag_buscar, es_consulta_historial
+from config import MODEL, CIUDAD, WAKE_WORD
 
 MAX_TURNOS  = 10
 _RE_ORACION = re.compile(r'(?<=[.!?])\s+')
+
+def _split_comandos(texto):
+    """Divide 'abre chrome y sube el volumen' en dos comandos si ambos son herramientas."""
+    partes = [p.strip() for p in re.split(r'\s+y\s+', texto, flags=re.IGNORECASE) if p.strip()]
+    if len(partes) <= 1:
+        return [texto]
+    # Solo dividir si cada parte matchea una herramienta (no va al LLM)
+    intents = [detectar(p)[0] for p in partes]
+    if all(i != "ninguna" for i in intents):
+        return partes
+    return [texto]
 
 def limpiar():
     if sys.platform == "win32":
@@ -148,6 +161,19 @@ def manejar_herramienta(texto):
             hablar("¿Por cuánto tiempo?")
         return True
 
+    if intent == "cancelar_timer":
+        hablar(tools.cancelar_timer())
+        return True
+
+    if intent == "memoria":
+        hecho = memoria.extraer_hecho(texto)
+        if hecho:
+            memoria.agregar(hecho)
+            hablar(f"Anotado: {hecho}.")
+        else:
+            hablar("¿Qué quieres que recuerde?")
+        return True
+
     return False
 
 def _consultar_ollama(historial):
@@ -178,7 +204,7 @@ def _consultar_ollama(historial):
 
     try:
         for chunk in ollama.chat(model=MODEL, messages=historial, stream=True,
-                                  options={"num_ctx": 1024, "num_predict": 200}):
+                                  options={"num_ctx": 1024, "num_predict": 120}):
             if interrumpido.is_set():
                 break
 
@@ -222,8 +248,10 @@ def main():
 
     inicializar_stt()
     apps.escanear_en_segundo_plano()
+    indexar_historial()
 
-    historial = [{"role": "system", "content": SYSTEM_PROMPT}]
+    from modules.prompt import get_system_prompt
+    historial = [{"role": "system", "content": get_system_prompt()}]
     hablar("Hola, soy Imai. Listo para ayudarte.")
 
     while True:
@@ -231,6 +259,8 @@ def main():
             if esta_pausado():
                 time.sleep(0.5)
                 continue
+            if WAKE_WORD == "1":
+                esperar_wake_word()
             texto = escuchar()
         except KeyboardInterrupt:
             hablar("Hasta luego.")
@@ -244,17 +274,55 @@ def main():
             hablar("Hasta luego.")
             break
 
+        # Comandos encadenados: "abre chrome y sube el volumen"
+        partes = _split_comandos(texto)
+        if len(partes) > 1:
+            for parte in partes:
+                intent, objeto = detectar(parte)
+                if manejar_herramienta(parte):
+                    log.guardar(
+                        messages=[
+                            {"role": "system",    "content": SYSTEM_PROMPT},
+                            {"role": "user",      "content": parte},
+                            {"role": "assistant", "content": ""},
+                        ],
+                        intent=intent, objeto=objeto, herramienta=True,
+                    )
+            continue
+
         # Herramientas primero — si matchea no va al LLM
-        intent, _ = detectar(texto)
+        intent, objeto = detectar(texto)
         if manejar_herramienta(texto):
-            log.registrar(texto, intent, "")
+            log.guardar(
+                messages=[
+                    {"role": "system",    "content": SYSTEM_PROMPT},
+                    {"role": "user",      "content": texto},
+                    {"role": "assistant", "content": ""},
+                ],
+                intent=intent,
+                objeto=objeto,
+                herramienta=True,
+            )
             continue
 
         historial = _truncar_historial(historial)
         historial.append({"role": "user", "content": texto})
 
+        if es_consulta_historial(texto):
+            fragmentos = rag_buscar(texto, n=3)
+            if fragmentos:
+                contexto = "\n---\n".join(fragmentos)
+                mensajes_ollama = historial[:-1] + [{
+                    "role":    "user",
+                    "content": f"Contexto de conversaciones anteriores:\n{contexto}\n\nPregunta: {texto}",
+                }]
+            else:
+                mensajes_ollama = historial
+        else:
+            mensajes_ollama = historial
+
         try:
-            respuesta = _consultar_ollama(historial)
+            respuesta = _consultar_ollama(mensajes_ollama)
         except Exception as e:
             print(f"\n[ Error al consultar Ollama: {e} ]")
             hablar("Tuve un problema. Intenta de nuevo.")
@@ -267,7 +335,11 @@ def main():
             continue
 
         historial.append({"role": "assistant", "content": respuesta})
-        log.registrar(texto, "llm", respuesta)
+        log.guardar(
+            messages=historial[-(MAX_TURNOS * 2):],
+            intent="ninguna",
+            herramienta=False,
+        )
 
 if __name__ == "__main__":
     try:

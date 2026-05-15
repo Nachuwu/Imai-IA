@@ -6,7 +6,7 @@ from modules.utils import sin_acentos as _sin_acentos
 import sounddevice as sd
 import scipy.io.wavfile as wav
 from faster_whisper import WhisperModel
-from config import SAMPLE_RATE, CHUNK, SILENCIO_MAX, DURACION_MAX, UMBRAL_RMS, TEMP_WAV, GROQ_API_KEY
+from config import SAMPLE_RATE, CHUNK, SILENCIO_MAX, DURACION_MAX, UMBRAL_RMS, TEMP_WAV
 
 model  = None
 umbral = UMBRAL_RMS
@@ -28,21 +28,11 @@ def reanudar():
     global _no_molestar_hasta
     _no_molestar_hasta = 0.0
 
-# Cliente Groq (None si no hay API key o paquete no instalado)
-_groq_client = None
-if GROQ_API_KEY:
-    try:
-        from groq import Groq
-        _groq_client = Groq(api_key=GROQ_API_KEY)
-    except ImportError:
-        pass
-
 def inicializar():
     global model
     print("Cargando Whisper...")
     model = WhisperModel("small", device="cpu", compute_type="int8")
-    modo = "Groq (nube)" if _groq_client else "local"
-    print(f"Whisper listo. STT: {modo}")
+    print("Whisper listo. STT: local")
     calibrar_umbral()
     print()
 
@@ -63,36 +53,26 @@ def calibrar_umbral():
         return
 
     ruido_base = float(np.mean(rmss))
-    umbral = int(np.clip(ruido_base * 4, 80, 600))
+    umbral = int(np.clip(ruido_base * 2.5, 60, 350))
     print(f"[ Umbral: {umbral} (ruido ambiente: {ruido_base:.0f}) ]")
 
 def _rms(chunk):
     return np.sqrt(np.mean(chunk.astype(np.float32) ** 2))
 
 def _transcribir(archivo):
-    if _groq_client:
-        try:
-            with open(archivo, "rb") as f:
-                resultado = _groq_client.audio.transcriptions.create(
-                    file=(os.path.basename(archivo), f.read()),
-                    model="whisper-large-v3-turbo",
-                    language="es",
-                    response_format="text",
-                )
-            return resultado.strip()
-        except Exception as e:
-            print(f"[ Groq STT falló, usando local: {e} ]")
-
-    # fallback: faster-whisper local
     segs, _ = model.transcribe(archivo, language="es")
     return " ".join(s.text for s in segs).strip()
 
 # Variantes que Whisper puede producir al escuchar "Imai"
-_WAKE_VARIANTS = {"imai", "imay", "imal", "imax", "emai", "amai", "y mai", "i mai", "y may"}
+_WAKE_VARIANTS = {
+    "imai", "imay", "imal", "imax", "emai", "amai",
+    "y mai", "i mai", "y may", "ima", "imai.", "oye imai",
+    "hey imai", "hola imai",
+}
 
 def esperar_wake_word():
     """Escucha en bucle hasta detectar 'imai' o variantes. Bloquea hasta activación."""
-    chunk_samples = int(1.5 * SAMPLE_RATE)
+    chunk_samples = int(2.0 * SAMPLE_RATE)  # chunk más largo = mejor reconocimiento
     print("[ En espera... di 'Imai' para activar ]", flush=True)
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
@@ -100,26 +80,21 @@ def esperar_wake_word():
                 chunk, _ = stream.read(chunk_samples)
                 if _rms(chunk) < umbral:
                     continue
-
-                fd, tmp = tempfile.mkstemp(suffix=".wav")
-                os.close(fd)
+                # Usar numpy float32 directo — sin archivo temporal
+                audio_f32 = chunk.flatten().astype(np.float32) / 32768.0
                 try:
-                    wav.write(tmp, SAMPLE_RATE, chunk)
                     segs, _ = model.transcribe(
-                        tmp, language="es",
-                        vad_filter=False, beam_size=1,
+                        audio_f32, language="es",
+                        vad_filter=False, beam_size=3,
                         condition_on_previous_text=False,
+                        temperature=0.0,
                     )
                     texto = _sin_acentos(" ".join(s.text for s in segs).lower().strip())
                     if any(v in texto for v in _WAKE_VARIANTS):
+                        print("[ Wake word detectado ]", flush=True)
                         return
                 except Exception:
                     pass
-                finally:
-                    try:
-                        os.unlink(tmp)
-                    except Exception:
-                        pass
     except sd.PortAudioError as e:
         print(f"[ Error de micrófono: {e} ]")
 

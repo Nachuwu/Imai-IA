@@ -2,23 +2,21 @@ import json
 import os
 from datetime import datetime
 
-_ARCHIVO = os.path.join(os.path.dirname(__file__), "..", "historial.json")
+_CARPETA = os.path.join(os.path.dirname(__file__), "..", "historial")
 
-def registrar(texto, intent, respuesta):
-    entrada = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "texto":     texto,
-        "intent":    intent,
-        "respuesta": respuesta,
-    }
+def guardar(messages, intent=None, objeto=None, herramienta=False):
     try:
-        try:
-            with open(_ARCHIVO, "r", encoding="utf-8") as f:
-                datos = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            datos = []
-        datos.append(entrada)
-        with open(_ARCHIVO, "w", encoding="utf-8") as f:
-            json.dump(datos, f, ensure_ascii=False, indent=2)
+        os.makedirs(_CARPETA, exist_ok=True)
+        hoy = datetime.now().strftime("%Y-%m-%d")
+        archivo = os.path.join(_CARPETA, f"{hoy}.jsonl")
+        entrada = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "messages":  messages,
+            "intent":    intent,
+            "objeto":    str(objeto) if objeto is not None else None,
+            "herramienta": herramienta,
+        }
+        with open(archivo, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entrada, ensure_ascii=False) + "\n")
     except Exception:
         pass
