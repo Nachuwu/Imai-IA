@@ -1,4 +1,3 @@
-ollama
 sounddevice
 scipy
 numpy
@@ -15,6 +14,14 @@ pillow
 plyer
 screen-brightness-control
 pyttsx3
+anthropic
+apscheduler<4
+pygetwindow
 piper-tts
 chromadb
 sentence-transformers
+openwakeword
+flask
+google-api-python-client
+google-auth-oauthlib
+pyautogui

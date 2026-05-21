@@ -52,14 +52,27 @@ def hablar(texto):
 
     evento_fin.set()
 
+_piper_voice = None
+
+def _get_piper_voice():
+    global _piper_voice
+    if _piper_voice is None:
+        from piper.voice import PiperVoice
+        _piper_voice = PiperVoice.load(PIPER_MODEL)
+    return _piper_voice
+
 def _hablar_piper(texto):
     try:
-        from piper.voice import PiperVoice
-        voice = PiperVoice.load(PIPER_MODEL)
-        audio = b"".join(voice.synthesize_stream_raw(texto))
-        arr = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
-        sd.play(arr, samplerate=voice.config.sample_rate)
-        while sd.get_stream().active:
+        voice  = _get_piper_voice()
+        chunks = list(voice.synthesize(texto))
+        if not chunks:
+            raise RuntimeError("Piper no generó audio")
+        sample_rate = chunks[0].sample_rate
+        audio = np.concatenate([c.audio_int16_array for c in chunks])
+        arr   = audio.astype(np.float32) / 32768.0
+        sd.play(arr, samplerate=sample_rate)
+        stream = sd.get_stream()
+        while stream is not None and stream.active:
             if _evento_interrupcion.is_set():
                 sd.stop()
                 return

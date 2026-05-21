@@ -1,6 +1,4 @@
 import re
-import ollama
-from config import MODEL
 from modules.utils import sin_acentos as _sin_acentos
 
 # ---------------------------------------------------------------------------
@@ -68,6 +66,7 @@ _PATRONES = {
     "volumen": r"\b(volumen|sube (el )?volumen|baja (el )?volumen|silencia|silencio|"
                r"sin sonido|activa (el )?sonido|pon(lo|la)? (al|en) \d+)\b",
     "buscar": r"\b(busca|encuentra|d[oó]nde est[aá]|buscar archivo|busca el|busca la)\b",
+    "repetir": r"\b(repite|rep[íi]telo|dilo de nuevo|no (te |lo )?(escuch[eé]|o[íi]|entend[íi])|no esc|otra vez|m[aá]s despacio|qu[eé] dijiste|qu[eé] dijo)\b",
 }
 
 # Palabras a ignorar al extraer el objeto de la frase
@@ -81,9 +80,6 @@ _STOPWORDS = {
     "aplicacion", "aplicaciones", "programa", "programas", "app",
 }
 
-_INTENTS_VALIDOS = set(_PATRONES.keys()) | {"ninguna", "cancelar_timer", "memoria"}
-
-
 def detectar(texto):
     """
     Retorna (intent, objeto) donde intent es una de las claves de _PATRONES
@@ -95,9 +91,7 @@ def detectar(texto):
         if re.search(patron, txt, re.IGNORECASE):
             return intent, _extraer_objeto(txt, intent)
 
-    # Fallback al LLM solo si ningún patrón coincidió
-    intent = _intent_llm(texto)
-    return intent, _extraer_objeto(txt, intent)
+    return "ninguna", None
 
 
 def _extraer_objeto(texto, intent):
@@ -174,25 +168,3 @@ def _extraer_objeto(texto, intent):
     return None
 
 
-def _intent_llm(texto):
-    """Consulta al LLM solo cuando los patrones no matchean nada."""
-    prompt = (
-        f"Clasifica esta instrucción en una sola palabra: "
-        f"abrir, cerrar, volumen, timer, buscar, o ninguna.\n"
-        f"Instrucción: {texto}\n"
-        f"Responde solo la palabra, sin explicación."
-    )
-    try:
-        r = ollama.chat(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            options={"num_predict": 5},
-        )
-        respuesta = r["message"]["content"].strip().lower()
-        # Extraer solo la primera palabra válida de la respuesta
-        for palabra in respuesta.split():
-            if palabra in _INTENTS_VALIDOS:
-                return palabra
-    except Exception:
-        pass
-    return "ninguna"

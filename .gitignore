@@ -2,8 +2,11 @@
 __pycache__/
 *.pyc
 *.pyo
-apps_cache.json
+venv/
+data/
+audio/temp.wav
+audio/respuesta.mp3
 historial/
 chroma_db/
-memoria.json
-audio/temp.wav
+models/
+wake_word_data/

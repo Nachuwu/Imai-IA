@@ -15,9 +15,11 @@ _CARPETAS_LNK = [
 _CARPETAS_EXE = [
     r"C:\Program Files",
     r"C:\Program Files (x86)",
+    os.path.expanduser(r"~\AppData\Local\Microsoft\WindowsApps"),
 ]
 
-_CACHE_FILE = os.path.join(os.path.dirname(__file__), "..", "apps_cache.json")
+from config import DATA_DIR as _DATA_DIR
+_CACHE_FILE = os.path.join(_DATA_DIR, "apps_cache.json")
 _CACHE_TTL  = 86400  # 24 horas
 
 _indice     = {}
@@ -101,6 +103,12 @@ def _escanear():
             continue
         try:
             for entrada in os.scandir(base):
+                # WindowsApps: los .exe están directamente en la carpeta raíz
+                if entrada.is_file() and entrada.name.lower().endswith(".exe"):
+                    nombre = os.path.splitext(entrada.name)[0].lower()
+                    tmp_abrir.setdefault(nombre, entrada.path)
+                    tmp_exe[nombre] = entrada.name
+                    continue
                 if not entrada.is_dir(follow_symlinks=False):
                     continue
                 try:

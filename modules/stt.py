@@ -6,10 +6,13 @@ from modules.utils import sin_acentos as _sin_acentos
 import sounddevice as sd
 import scipy.io.wavfile as wav
 from faster_whisper import WhisperModel
-from config import SAMPLE_RATE, CHUNK, SILENCIO_MAX, DURACION_MAX, UMBRAL_RMS, TEMP_WAV
+from config import SAMPLE_RATE, CHUNK, SILENCIO_MAX, DURACION_MAX, UMBRAL_RMS, TEMP_WAV, GROQ_API_KEY, WAKE_WORD_MODEL, WAKE_WORD_TARGET
 
-model  = None
-umbral = UMBRAL_RMS
+model      = None
+umbral     = UMBRAL_RMS
+_oww_model = None
+_OWW_CHUNK = 1280   # 80 ms a 16 kHz
+_OWW_SCORE = 0.5    # umbral de activación
 
 # ---------------------------------------------------------------------------
 # Modo no molestar
@@ -28,11 +31,36 @@ def reanudar():
     global _no_molestar_hasta
     _no_molestar_hasta = 0.0
 
+# Cliente Groq (None si no hay API key o paquete no instalado)
+_groq_client = None
+if GROQ_API_KEY:
+    try:
+        from groq import Groq
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    except ImportError:
+        pass
+
+def _cargar_oww():
+    global _oww_model
+    if not os.path.exists(WAKE_WORD_MODEL):
+        return
+    try:
+        import openwakeword
+        openwakeword.utils.download_models()  # descarga melspectrogram.onnx y otros base si faltan
+        from openwakeword.model import Model as OWWModel
+        _oww_model = OWWModel(wakeword_models=[WAKE_WORD_MODEL], inference_framework="onnx")
+        print(f"[ Wake word OWW: {os.path.basename(WAKE_WORD_MODEL)} ]")
+    except Exception as e:
+        print(f"[ openWakeWord no disponible, usando Whisper: {e} ]")
+
+
 def inicializar():
     global model
     print("Cargando Whisper...")
     model = WhisperModel("small", device="cpu", compute_type="int8")
-    print("Whisper listo. STT: local")
+    modo = "Groq (nube)" if _groq_client else "local"
+    print(f"Whisper listo. STT: {modo}")
+    _cargar_oww()
     calibrar_umbral()
     print()
 
@@ -60,37 +88,100 @@ def _rms(chunk):
     return np.sqrt(np.mean(chunk.astype(np.float32) ** 2))
 
 def _transcribir(archivo):
-    segs, _ = model.transcribe(archivo, language="es")
-    return " ".join(s.text for s in segs).strip()
+    """Retorna (texto, idioma_iso) donde idioma puede ser None si no se detecta."""
+    if _groq_client:
+        try:
+            with open(archivo, "rb") as f:
+                resultado = _groq_client.audio.transcriptions.create(
+                    file=(os.path.basename(archivo), f.read()),
+                    model="whisper-large-v3",
+                    response_format="verbose_json",
+                )
+            return resultado.text.strip(), getattr(resultado, "language", None)
+        except Exception as e:
+            print(f"[ Groq STT falló, usando local: {e} ]")
 
-# Variantes que Whisper puede producir al escuchar "Imai"
-_WAKE_VARIANTS = {
-    "imai", "imay", "imal", "imax", "emai", "amai",
-    "y mai", "i mai", "y may", "ima", "imai.", "oye imai",
-    "hey imai", "hola imai",
-}
+    segs, info = model.transcribe(archivo)
+    return " ".join(s.text for s in segs).strip(), getattr(info, "language", None)
+
+_WAKE_TARGET = WAKE_WORD_TARGET
+_WAKE_FUZZY_THRESHOLD = 75  # similitud mínima (0-100) para considerar match
+
+def _es_wake_word(texto):
+    """Devuelve True si el texto contiene 'imai' o algo muy similar."""
+    from rapidfuzz.distance import Levenshtein
+    texto = _sin_acentos(texto.lower().strip())
+    if _WAKE_TARGET in texto:
+        return True
+    # Comparar cada palabra del texto con "imai"
+    for palabra in texto.split():
+        palabra = palabra.strip(".,;:!?¿¡")
+        if not palabra:
+            continue
+        # similitud como porcentaje basado en distancia Levenshtein
+        max_len = max(len(palabra), len(_WAKE_TARGET))
+        dist    = Levenshtein.distance(palabra, _WAKE_TARGET)
+        sim     = (1 - dist / max_len) * 100
+        if sim >= _WAKE_FUZZY_THRESHOLD:
+            return True
+    return False
 
 def esperar_wake_word():
-    """Escucha en bucle hasta detectar 'imai' o variantes. Bloquea hasta activación."""
-    chunk_samples = int(2.0 * SAMPLE_RATE)  # chunk más largo = mejor reconocimiento
-    print("[ En espera... di 'Imai' para activar ]", flush=True)
+    """Escucha en bucle hasta detectar 'imai'. Usa OWW si el modelo está cargado, Whisper si no."""
+    if _oww_model is not None:
+        _esperar_oww()
+    else:
+        _esperar_whisper()
+
+
+def _esperar_oww():
+    print("[ En espera... di 'Imai' para activar (OWW) ]", flush=True)
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             while True:
-                chunk, _ = stream.read(chunk_samples)
-                if _rms(chunk) < umbral:
+                chunk, _ = stream.read(_OWW_CHUNK)
+                audio = chunk.flatten().astype(np.float32) / 32768.0
+                prediccion = _oww_model.predict(audio)
+                for nombre, score in prediccion.items():
+                    if score >= _OWW_SCORE:
+                        print(f"[ Wake word detectado (OWW score={score:.2f}) ]", flush=True)
+                        return
+    except sd.PortAudioError as e:
+        print(f"[ Error de micrófono: {e} ]")
+
+
+def _esperar_whisper():
+    """Buffer deslizante de 2s que avanza cada 0.5s — 'Imai' nunca queda cortado."""
+    BUFFER_S = 2.0
+    STEP_S   = 0.5
+    buf_n    = int(BUFFER_S * SAMPLE_RATE)
+    step_n   = int(STEP_S   * SAMPLE_RATE)
+    buf      = np.zeros(buf_n, dtype=np.int16)
+
+    print(f"[ En espera... di '{_WAKE_TARGET}' para activar ]", flush=True)
+    try:
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
+            while True:
+                chunk, _ = stream.read(step_n)
+                chunk = chunk.flatten()
+                buf   = np.roll(buf, -step_n)
+                buf[-step_n:] = chunk
+
+                if _rms(chunk.reshape(-1, 1)) < umbral:
                     continue
-                # Usar numpy float32 directo — sin archivo temporal
-                audio_f32 = chunk.flatten().astype(np.float32) / 32768.0
+
+                audio_f32 = buf.astype(np.float32) / 32768.0
                 try:
                     segs, _ = model.transcribe(
                         audio_f32, language="es",
-                        vad_filter=False, beam_size=3,
+                        vad_filter=True, beam_size=3,
                         condition_on_previous_text=False,
                         temperature=0.0,
                     )
-                    texto = _sin_acentos(" ".join(s.text for s in segs).lower().strip())
-                    if any(v in texto for v in _WAKE_VARIANTS):
+                    texto = " ".join(s.text for s in segs)
+                    if texto.strip():
+                        print(f"[ Wake word escuchó: '{texto.strip()}' ]", flush=True)
+                    if _es_wake_word(texto):
                         print("[ Wake word detectado ]", flush=True)
                         return
                 except Exception:
@@ -129,17 +220,18 @@ def escuchar():
                         chunks_silencio = 0
     except sd.PortAudioError as e:
         print(f"[ Error de micrófono: {e} ]")
-        return ""
+        return "", None
 
     if not frames:
         print("[ Sin voz detectada ]")
-        return ""
+        return "", None
 
     print("[ ■ Procesando... ]", flush=True)
     audio = np.concatenate(frames, axis=0)
     try:
         wav.write(TEMP_WAV, SAMPLE_RATE, audio)
-        return _transcribir(TEMP_WAV)
+        texto, idioma = _transcribir(TEMP_WAV)
+        return texto, idioma
     except Exception as e:
         print(f"[ Error al transcribir: {e} ]")
-        return ""
+        return "", None

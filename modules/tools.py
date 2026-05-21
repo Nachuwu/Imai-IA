@@ -2,6 +2,7 @@ import os
 import re
 import ast
 import glob
+import json
 import operator
 import threading
 import time
@@ -275,18 +276,60 @@ def get_portapapeles():
         return "No pude acceder al portapapeles."
 
 # ---------------------------------------------------------------------------
+# Búsqueda web (DuckDuckGo Instant Answer — sin API key)
+# ---------------------------------------------------------------------------
+
+def buscar_web(query):
+    try:
+        r = requests.get(
+            "https://api.duckduckgo.com/",
+            params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+            timeout=6,
+        )
+        data = r.json()
+        respuesta = data.get("AbstractText") or data.get("Answer") or ""
+        if respuesta:
+            return respuesta[:600]
+        # Intentar con los RelatedTopics
+        temas = data.get("RelatedTopics", [])
+        if temas and isinstance(temas[0], dict):
+            texto = temas[0].get("Text", "")
+            if texto:
+                return texto[:400]
+        return f"No encontré información directa sobre {query}."
+    except Exception as e:
+        return f"No pude buscar ahora mismo: {e}"
+
+# ---------------------------------------------------------------------------
 # Captura de pantalla
 # ---------------------------------------------------------------------------
 
+def _captura_ruta():
+    """Toma captura y devuelve la ruta del archivo."""
+    carpeta = os.path.expanduser(r"~\Pictures\Imai")
+    os.makedirs(carpeta, exist_ok=True)
+    nombre = datetime.now().strftime("captura_%Y%m%d_%H%M%S.png")
+    ruta = os.path.join(carpeta, nombre)
+    ImageGrab.grab().save(ruta)
+    return ruta
+
 def captura_pantalla():
     try:
-        carpeta = os.path.expanduser(r"~\Pictures\Imai")
-        os.makedirs(carpeta, exist_ok=True)
-        nombre = datetime.now().strftime("captura_%Y%m%d_%H%M%S.png")
-        ImageGrab.grab().save(os.path.join(carpeta, nombre))
-        return f"Captura guardada como {nombre}."
+        ruta = _captura_ruta()
+        return f"Captura guardada como {os.path.basename(ruta)}."
     except Exception as e:
         return f"No pude tomar la captura: {e}"
+
+def analizar_pantalla(pregunta="¿Qué hay en esta pantalla?"):
+    try:
+        ruta = _captura_ruta()
+    except Exception as e:
+        return f"No pude tomar la captura: {e}"
+    try:
+        from modules.claude_llm import analizar_imagen
+        return analizar_imagen(ruta, pregunta)
+    except Exception as e:
+        return f"No pude analizar la pantalla: {e}"
 
 # ---------------------------------------------------------------------------
 # Notificaciones de escritorio
@@ -330,6 +373,22 @@ def spotify_parar():
     _tecla_media("parar")
     return "Música detenida."
 
+_SPOTIFY_HIST_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "spotify_historial.json")
+
+def _log_cancion(titulo):
+    try:
+        historial = []
+        if os.path.exists(_SPOTIFY_HIST_FILE):
+            with open(_SPOTIFY_HIST_FILE, encoding="utf-8") as f:
+                historial = json.load(f)
+        if not historial or historial[-1].get("titulo") != titulo:
+            historial.append({"titulo": titulo, "fecha": datetime.now().isoformat()})
+            historial = historial[-200:]  # máximo 200 entradas
+            with open(_SPOTIFY_HIST_FILE, "w", encoding="utf-8") as f:
+                json.dump(historial, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 def get_cancion_spotify():
     try:
         r = _sp.run(
@@ -341,10 +400,97 @@ def get_cancion_spotify():
         )
         titulo = r.stdout.strip()
         if titulo and titulo.lower() != "spotify":
+            _log_cancion(titulo)
             return f"Está sonando: {titulo}."
         return "Spotify está pausado o no hay nada sonando."
     except Exception:
         return "No pude leer la canción actual."
+
+def historial_spotify(n=10):
+    """Retorna las últimas N canciones escuchadas."""
+    try:
+        if not os.path.exists(_SPOTIFY_HIST_FILE):
+            return "Todavía no hay historial de Spotify."
+        with open(_SPOTIFY_HIST_FILE, encoding="utf-8") as f:
+            historial = json.load(f)
+        if not historial:
+            return "Todavía no hay historial de Spotify."
+        recientes = historial[-n:][::-1]
+        partes = [e["titulo"] for e in recientes]
+        return "Canciones recientes: " + "; ".join(partes) + "."
+    except Exception:
+        return "No pude leer el historial de Spotify."
+
+# ---------------------------------------------------------------------------
+# Control de ventanas
+# ---------------------------------------------------------------------------
+
+def controlar_ventana(accion, titulo=None):
+    import pygetwindow as gw
+    from rapidfuzz import process as fz
+
+    if accion == "listar":
+        titulos = [w.title for w in gw.getAllWindows() if w.title.strip()]
+        return ("Ventanas abiertas: " + ", ".join(titulos[:10]) + ".") if titulos else "No hay ventanas abiertas."
+
+    if not titulo:
+        return "¿Qué ventana quieres controlar?"
+
+    ventanas = gw.getWindowsWithTitle(titulo)
+    if not ventanas:
+        todas = [w.title for w in gw.getAllWindows() if w.title.strip()]
+        match = fz.extractOne(titulo, todas, score_cutoff=60)
+        if match:
+            ventanas = gw.getWindowsWithTitle(match[0])
+
+    if not ventanas:
+        return f"No encontré una ventana con '{titulo}'."
+
+    win    = ventanas[0]
+    nombre = win.title[:50]
+
+    try:
+        if accion == "minimizar":
+            win.minimize();  return f"Minimicé '{nombre}'."
+        if accion == "maximizar":
+            win.maximize();  return f"Maximicé '{nombre}'."
+        if accion == "restaurar":
+            win.restore();   return f"Restauré '{nombre}'."
+        if accion == "enfocar":
+            win.activate();  return f"Cambié a '{nombre}'."
+    except Exception as e:
+        return f"No pude controlar la ventana: {e}"
+
+    return f"Acción '{accion}' no reconocida."
+
+# ---------------------------------------------------------------------------
+# Control del PC
+# ---------------------------------------------------------------------------
+
+def apagar_pc():
+    import subprocess
+    subprocess.run(["shutdown", "/s", "/t", "10"])
+    return "Apagando el PC en 10 segundos. Di 'cancela apagado' si cambias de idea."
+
+def reiniciar_pc():
+    import subprocess
+    subprocess.run(["shutdown", "/r", "/t", "10"])
+    return "Reiniciando el PC en 10 segundos."
+
+def cancelar_apagado():
+    import subprocess
+    subprocess.run(["shutdown", "/a"])
+    return "Apagado cancelado."
+
+def bloquear_pantalla():
+    import ctypes
+    ctypes.windll.user32.LockWorkStation()
+    return "Pantalla bloqueada."
+
+def suspender_pc():
+    import subprocess
+    subprocess.Popen(["rundll32", "powrprof.dll,SetSuspendState", "0", "1", "0"])
+    return "Entrando en suspensión."
 
 # ---------------------------------------------------------------------------
 # Brillo de pantalla
@@ -382,3 +528,64 @@ def bajar_brillo(delta=10):
         return f"Brillo al {nuevo} por ciento."
     except Exception:
         return "No pude cambiar el brillo."
+
+# ---------------------------------------------------------------------------
+# Control de mouse y teclado (pyautogui)
+# ---------------------------------------------------------------------------
+
+import pyautogui as _pag
+_pag.FAILSAFE = True   # mover mouse a esquina superior izquierda aborta
+_pag.PAUSE    = 0.05
+
+def escribir_teclado(texto):
+    """Escribe texto usando el portapapeles (soporta unicode)."""
+    pyperclip.copy(texto)
+    _pag.hotkey("ctrl", "v")
+    return f"Escribí: {texto[:60]}{'...' if len(texto) > 60 else ''}."
+
+def presionar_tecla(combo):
+    """Presiona una tecla o combinación: 'enter', 'ctrl+c', 'alt+f4', etc."""
+    partes = [t.strip() for t in combo.lower().split("+")]
+    if len(partes) == 1:
+        _pag.press(partes[0])
+    else:
+        _pag.hotkey(*partes)
+    return f"Tecla: {combo}."
+
+def scroll_pantalla(direccion="abajo", cantidad=3):
+    clicks = cantidad if direccion == "arriba" else -cantidad
+    _pag.scroll(clicks)
+    return f"Scroll {'arriba' if clicks > 0 else 'abajo'}."
+
+def click_en(x, y):
+    _pag.click(x, y)
+    return f"Clic en ({x}, {y})."
+
+def click_en_texto(texto):
+    """Toma captura, usa Claude Vision para encontrar el elemento y hace clic."""
+    import tempfile
+    from modules.claude_llm import analizar_imagen
+    img = ImageGrab.grab()
+    w, h = img.size
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        img.save(f.name)
+        ruta = f.name
+    try:
+        pregunta = (
+            f"Busca el elemento de interfaz con el texto o ícono '{texto}' "
+            f"en esta pantalla de {w}x{h} píxeles. "
+            f"Responde ÚNICAMENTE con las coordenadas del centro en formato 'x,y'. "
+            f"Si no lo encuentras, responde 'no encontrado'."
+        )
+        respuesta = analizar_imagen(ruta, pregunta).strip().lower()
+    finally:
+        os.unlink(ruta)
+
+    if "no encontrado" in respuesta or "no" in respuesta and "," not in respuesta:
+        return f"No encontré '{texto}' en pantalla."
+    m = re.search(r"(\d+)\s*,\s*(\d+)", respuesta)
+    if not m:
+        return f"No pude interpretar la posición de '{texto}'."
+    x, y = int(m.group(1)), int(m.group(2))
+    _pag.click(x, y)
+    return f"Hice clic en '{texto}'."

@@ -1,35 +1,35 @@
 import re
 import sys
 import time
-import queue
 import subprocess
-import threading
-import ollama
-from modules.stt import escuchar, inicializar as inicializar_stt, esta_pausado, pausar as pausar_micro, esperar_wake_word
+from modules.stt import escuchar, inicializar as inicializar_stt, esta_pausado, esperar_wake_word
 from modules.tts import hablar, fue_interrumpido
-from modules.prompt import SYSTEM_PROMPT
+from modules.prompt import get_system_prompt
 from modules.intent import detectar
 import modules.apps as apps
 import modules.tools as tools
 import modules.urls as urls
 import modules.historial as log
 import modules.memoria as memoria
+from modules.tools_def import ejecutar as ejecutar_tool
+from modules.claude_llm import consultar as claude_consultar
 from modules.rag import indexar_historial, buscar as rag_buscar, es_consulta_historial
-from config import MODEL, CIUDAD, WAKE_WORD
+import modules.recordatorios as recordatorios
+import modules.dashboard as dashboard
+from config import CIUDAD, WAKE_WORD
 
-MAX_TURNOS  = 10
-_RE_ORACION = re.compile(r'(?<=[.!?])\s+')
+MAX_TURNOS = 10
+_ultima_respuesta = ""
+
+_SEP_COMANDOS = re.compile(
+    r'\s+(?:y|luego|despu[eé]s|tambi[eé]n|adem[aá]s)\s+',
+    re.IGNORECASE,
+)
 
 def _split_comandos(texto):
-    """Divide 'abre chrome y sube el volumen' en dos comandos si ambos son herramientas."""
-    partes = [p.strip() for p in re.split(r'\s+y\s+', texto, flags=re.IGNORECASE) if p.strip()]
-    if len(partes) <= 1:
-        return [texto]
-    # Solo dividir si cada parte matchea una herramienta (no va al LLM)
-    intents = [detectar(p)[0] for p in partes]
-    if all(i != "ninguna" for i in intents):
-        return partes
-    return [texto]
+    """Divide comandos encadenados por 'y', 'luego', 'después', etc."""
+    partes = [p.strip() for p in _SEP_COMANDOS.split(texto) if p.strip()]
+    return partes if len(partes) > 1 else [texto]
 
 def limpiar():
     if sys.platform == "win32":
@@ -44,126 +44,116 @@ def _truncar_historial(historial):
         mensajes = mensajes[-(MAX_TURNOS * 2):]
     return sistema + mensajes
 
-def _limpiar_markdown(texto):
-    texto = re.sub(r'\*\*(.+?)\*\*', r'\1', texto)
-    texto = re.sub(r'\*(.+?)\*',     r'\1', texto)
-    texto = re.sub(r'`(.+?)`',       r'\1', texto)
-    texto = re.sub(r'^#{1,6}\s+',    '',    texto, flags=re.MULTILINE)
-    texto = re.sub(r'^\s*[-*+]\s+',  '',    texto, flags=re.MULTILINE)
-    texto = re.sub(r'^\s*\d+\.\s+',  '',    texto, flags=re.MULTILINE)
-    return texto.strip()
+# ---------------------------------------------------------------------------
+# Fast path — regex para comandos claros sin pasar por el LLM
+# ---------------------------------------------------------------------------
 
 def manejar_herramienta(texto):
-    """
-    Evalúa si el texto es un comando de herramienta.
-    Retorna True si lo manejó, False si debe ir al LLM.
-    """
     intent, objeto = detectar(texto)
 
     if intent == "abrir":
         key = apps.abrir(objeto or "")
         hablar(f"Abriendo {key}." if key else f"No encontré {objeto}.")
-        return True
+        return True, intent, objeto
 
     if intent == "cerrar":
         key = apps.cerrar(objeto or "")
         hablar(f"Cerrando {key}." if key else f"No encontré {objeto} ejecutándose.")
-        return True
+        return True, intent, objeto
 
     if intent == "volumen":
-        if isinstance(objeto, int):
-            hablar(tools.set_volumen(objeto))
-        elif objeto == "subir":
-            hablar(tools.subir_volumen())
-        elif objeto == "bajar":
-            hablar(tools.bajar_volumen())
-        elif objeto == "silenciar":
-            hablar(tools.silenciar())
-        elif objeto == "activar":
-            hablar(tools.activar_sonido())
-        else:
-            hablar(tools.get_volumen())
-        return True
+        if isinstance(objeto, int):   hablar(tools.set_volumen(objeto))
+        elif objeto == "subir":       hablar(tools.subir_volumen())
+        elif objeto == "bajar":       hablar(tools.bajar_volumen())
+        elif objeto == "silenciar":   hablar(tools.silenciar())
+        elif objeto == "activar":     hablar(tools.activar_sonido())
+        else:                         hablar(tools.get_volumen())
+        return True, intent, objeto
 
     if intent == "timer":
         if objeto:
-            def _cb_timer(msg):
+            def _cb(msg):
                 tools.notificar("Imai — Timer", msg)
                 hablar(msg)
-            hablar(tools.crear_timer(objeto, _cb_timer))
+            hablar(tools.crear_timer(objeto, _cb))
         else:
             hablar("¿De cuántos segundos o minutos el timer?")
-        return True
+        return True, intent, objeto
 
     if intent == "buscar":
         hablar(f"Buscando {objeto}.")
         tools.buscar_archivos(objeto or "", callback=hablar)
-        return True
+        return True, intent, objeto
 
     if intent == "hora":
         hablar(tools.get_hora())
-        return True
+        return True, intent, objeto
 
     if intent == "fecha":
         hablar(tools.get_fecha())
-        return True
+        return True, intent, objeto
 
     if intent == "clima":
-        ciudad = objeto or CIUDAD
-        hablar(tools.get_clima(ciudad))
-        return True
+        hablar(tools.get_clima(objeto or CIUDAD))
+        return True, intent, objeto
 
     if intent == "calcular":
         if objeto:
-            resultado = tools.calcular(objeto)
-            hablar(f"{resultado}." if resultado else "No pude calcular eso.")
+            r = tools.calcular(objeto)
+            hablar(f"{r}." if r else "No pude calcular eso.")
         else:
             hablar("¿Qué quieres calcular?")
-        return True
+        return True, intent, objeto
 
     if intent == "portapapeles":
         hablar(tools.get_portapapeles())
-        return True
+        return True, intent, objeto
 
     if intent == "captura":
         hablar(tools.captura_pantalla())
-        return True
+        return True, intent, objeto
 
     if intent == "spotify":
-        if objeto == "siguiente":    respuesta = tools.spotify_siguiente()
-        elif objeto == "anterior":   respuesta = tools.spotify_anterior()
-        elif objeto == "pausa":      respuesta = tools.spotify_play_pause()
-        elif objeto == "parar":      respuesta = tools.spotify_parar()
-        elif objeto == "que_suena":  respuesta = tools.get_cancion_spotify()
-        else:                        respuesta = tools.spotify_play_pause()
-        hablar(respuesta)
-        return True
+        if objeto == "siguiente":   hablar(tools.spotify_siguiente())
+        elif objeto == "anterior":  hablar(tools.spotify_anterior())
+        elif objeto == "pausa":     hablar(tools.spotify_play_pause())
+        elif objeto == "parar":     hablar(tools.spotify_parar())
+        elif objeto == "que_suena": hablar(tools.get_cancion_spotify())
+        else:                       hablar(tools.spotify_play_pause())
+        return True, intent, objeto
 
     if intent == "brillo":
-        if isinstance(objeto, int):   hablar(tools.set_brillo(objeto))
-        elif objeto == "subir":       hablar(tools.subir_brillo())
-        elif objeto == "bajar":       hablar(tools.bajar_brillo())
-        else:                         hablar(tools.get_brillo())
-        return True
+        if isinstance(objeto, int): hablar(tools.set_brillo(objeto))
+        elif objeto == "subir":     hablar(tools.subir_brillo())
+        elif objeto == "bajar":     hablar(tools.bajar_brillo())
+        else:                       hablar(tools.get_brillo())
+        return True, intent, objeto
 
     if intent == "url":
         hablar(urls.manejar(objeto or texto))
-        return True
+        return True, intent, objeto
 
     if intent == "no_molestar":
         if objeto:
-            pausar_micro(objeto)
-            def _reanudar(msg):
-                hablar("Ya puedes hablarme.")
+            from modules.stt import pausar as _pausar
+            _pausar(objeto)
+            def _reanudar(msg): hablar("Ya puedes hablarme.")
             tools.crear_timer(objeto, _reanudar)
             hablar(f"De acuerdo, silencio por {tools._fmt_tiempo(objeto)}.")
         else:
             hablar("¿Por cuánto tiempo?")
-        return True
+        return True, intent, objeto
 
     if intent == "cancelar_timer":
         hablar(tools.cancelar_timer())
-        return True
+        return True, intent, objeto
+
+    if intent == "repetir":
+        if _ultima_respuesta:
+            hablar(_ultima_respuesta)
+        else:
+            hablar("No tengo nada que repetir todavía.")
+        return True, intent, objeto
 
     if intent == "memoria":
         hecho = memoria.extraer_hecho(texto)
@@ -172,70 +162,41 @@ def manejar_herramienta(texto):
             hablar(f"Anotado: {hecho}.")
         else:
             hablar("¿Qué quieres que recuerde?")
-        return True
+        return True, intent, objeto
 
-    return False
+    return False, intent, objeto
 
-def _consultar_ollama(historial):
-    cola         = queue.Queue()
-    interrumpido = threading.Event()
+# ---------------------------------------------------------------------------
+# LLM con tool calling — para comandos ambiguos y conversación
+# ---------------------------------------------------------------------------
 
-    def _reproductor():
-        while True:
-            oracion = cola.get()
-            if oracion is None:
-                break
-            hablar(oracion)
-            if fue_interrumpido():
-                interrumpido.set()
-                while True:
-                    try:
-                        cola.get_nowait()
-                    except queue.Empty:
-                        break
-                break
+def _hablar_y_recordar(texto):
+    global _ultima_respuesta
+    _ultima_respuesta = texto
+    hablar(texto)
 
-    hilo = threading.Thread(target=_reproductor, daemon=True)
-    hilo.start()
+def _hablar_streaming(oracion):
+    global _ultima_respuesta
+    _ultima_respuesta = oracion
+    if not fue_interrumpido():
+        hablar(oracion)
 
-    buffer         = ""
-    texto_completo = ""
-    print("Imai: ", end="", flush=True)
-
+def _resumen_matutino():
+    import modules.calendario as calendario
+    hora  = tools.get_hora()
+    clima = tools.get_clima(CIUDAD)
+    recs  = recordatorios.listar()
+    partes = [hora, clima]
+    if "No tienes" not in recs and "No hay" not in recs:
+        partes.append(recs)
     try:
-        for chunk in ollama.chat(model=MODEL, messages=historial, stream=True,
-                                  options={"num_ctx": 1024, "num_predict": 120}):
-            if interrumpido.is_set():
-                break
+        eventos = calendario.ver_eventos_hoy()
+        if "No tienes eventos" not in eventos and "no está configurado" not in eventos:
+            partes.append(eventos)
+    except Exception:
+        pass
+    hablar(" ".join(partes))
 
-            parte = chunk["message"]["content"]
-            buffer         += parte
-            texto_completo += parte
-            print(parte, end="", flush=True)
-
-            while True:
-                m = _RE_ORACION.search(buffer)
-                if not m:
-                    break
-                oracion = _limpiar_markdown(buffer[:m.start() + 1])
-                buffer  = buffer[m.end():]
-                if oracion:
-                    cola.put(oracion)
-
-    except Exception as e:
-        cola.put(None)
-        hilo.join()
-        raise e
-
-    print()
-
-    if buffer.strip() and not interrumpido.is_set():
-        cola.put(_limpiar_markdown(buffer.strip()))
-
-    cola.put(None)
-    hilo.join()
-
-    return _limpiar_markdown(texto_completo)
 
 def main():
     limpiar()
@@ -249,10 +210,16 @@ def main():
     inicializar_stt()
     apps.escanear_en_segundo_plano()
     indexar_historial()
+    memoria.indexar_existentes()
+    recordatorios.inicializar(hablar)
+    dashboard.iniciar()
 
-    from modules.prompt import get_system_prompt
-    historial = [{"role": "system", "content": get_system_prompt()}]
-    hablar("Hola, soy Imai. Listo para ayudarte.")
+    system_prompt = get_system_prompt()
+    historial = [{"role": "system", "content": system_prompt}]
+    _resumen_matutino()
+
+    import winsound
+    _turnos_conv = 0
 
     while True:
         try:
@@ -260,13 +227,19 @@ def main():
                 time.sleep(0.5)
                 continue
             if WAKE_WORD == "1":
-                esperar_wake_word()
-            texto = escuchar()
+                if _turnos_conv > 0:
+                    _turnos_conv -= 1
+                    winsound.Beep(660, 80)   # beep suave = modo conversación activo
+                else:
+                    esperar_wake_word()
+                    winsound.Beep(880, 120)  # beep alto = wake word detectado
+            texto, idioma = escuchar()
         except KeyboardInterrupt:
             hablar("Hasta luego.")
             break
 
         if not texto:
+            _turnos_conv = 0
             continue
 
         print(f"Tu: {texto}")
@@ -274,59 +247,78 @@ def main():
             hablar("Hasta luego.")
             break
 
-        # Comandos encadenados: "abre chrome y sube el volumen"
-        partes = _split_comandos(texto)
-        if len(partes) > 1:
-            for parte in partes:
-                intent, objeto = detectar(parte)
-                if manejar_herramienta(parte):
-                    log.guardar(
-                        messages=[
-                            {"role": "system",    "content": SYSTEM_PROMPT},
-                            {"role": "user",      "content": parte},
-                            {"role": "assistant", "content": ""},
-                        ],
-                        intent=intent, objeto=objeto, herramienta=True,
-                    )
+        # Fast path — ejecuta los comandos que reconoce, acumula el resto para LLM
+        textos    = _split_comandos(texto)
+        llm_partes = []
+        for t in textos:
+            manejado, intent, objeto = manejar_herramienta(t)
+            if manejado:
+                log.guardar(
+                    messages=[
+                        {"role": "system",    "content": system_prompt},
+                        {"role": "user",      "content": t},
+                        {"role": "assistant", "content": ""},
+                    ],
+                    intent=intent, objeto=objeto, herramienta=True,
+                )
+            else:
+                llm_partes.append(t)
+
+        if not llm_partes:
+            _turnos_conv = 2
             continue
 
-        # Herramientas primero — si matchea no va al LLM
-        intent, objeto = detectar(texto)
-        if manejar_herramienta(texto):
-            log.guardar(
-                messages=[
-                    {"role": "system",    "content": SYSTEM_PROMPT},
-                    {"role": "user",      "content": texto},
-                    {"role": "assistant", "content": ""},
-                ],
-                intent=intent,
-                objeto=objeto,
-                herramienta=True,
-            )
-            continue
+        # Si solo algunos fueron al fast path, LLM procesa el resto
+        if len(llm_partes) < len(textos):
+            texto = " y ".join(llm_partes)
 
+        # LLM path — conversación y comandos ambiguos
         historial = _truncar_historial(historial)
-        historial.append({"role": "user", "content": texto})
 
+        contenido_usuario = texto
+        if idioma and idioma != "es":
+            contenido_usuario = f"[Responde en {idioma}]\n{texto}"
         if es_consulta_historial(texto):
             fragmentos = rag_buscar(texto, n=3)
             if fragmentos:
                 contexto = "\n---\n".join(fragmentos)
-                mensajes_ollama = historial[:-1] + [{
-                    "role":    "user",
-                    "content": f"Contexto de conversaciones anteriores:\n{contexto}\n\nPregunta: {texto}",
-                }]
-            else:
-                mensajes_ollama = historial
-        else:
-            mensajes_ollama = historial
+                contenido_usuario = f"Contexto de conversaciones anteriores:\n{contexto}\n\nPregunta: {contenido_usuario}"
+
+        historial.append({"role": "user", "content": contenido_usuario})
 
         try:
-            respuesta = _consultar_ollama(mensajes_ollama)
+            respuesta, tool_calls = claude_consultar(historial, hablar_cb=_hablar_streaming)
         except Exception as e:
-            print(f"\n[ Error al consultar Ollama: {e} ]")
+            print(f"\n[ Error al consultar Claude: {e} ]")
+            winsound.Beep(300, 400)
             hablar("Tuve un problema. Intenta de nuevo.")
             historial.pop()
+            continue
+
+        if tool_calls:
+            resultados = []
+            for tc in tool_calls:
+                nombre = tc["function"]["name"]
+                args   = tc["function"]["arguments"]
+                print(f"[ Tool: {nombre} ]")
+                resultado = ejecutar_tool(nombre, args, hablar_cb=hablar)
+                if resultado:
+                    _hablar_y_recordar(resultado)
+                resultados.append(resultado)
+                if nombre in ("guardar_memoria", "guardar_perfil", "actualizar_memoria"):
+                    system_prompt = get_system_prompt()
+                    historial[0]  = {"role": "system", "content": system_prompt}
+                log.guardar(
+                    messages=[
+                        {"role": "system",    "content": system_prompt},
+                        {"role": "user",      "content": texto},
+                        {"role": "assistant", "content": resultado},
+                    ],
+                    intent=nombre, objeto=str(args), herramienta=True,
+                )
+            historial.append({"role": "assistant", "content": " ".join(resultados)})
+            if nombre not in ("actualizar_memoria", "guardar_memoria"):
+                _turnos_conv = 2
             continue
 
         if fue_interrumpido():
@@ -335,11 +327,13 @@ def main():
             continue
 
         historial.append({"role": "assistant", "content": respuesta})
+        _turnos_conv = 2
         log.guardar(
             messages=historial[-(MAX_TURNOS * 2):],
             intent="ninguna",
             herramienta=False,
         )
+
 
 if __name__ == "__main__":
     try:
