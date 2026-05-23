@@ -8,9 +8,10 @@ import scipy.io.wavfile as wav
 from faster_whisper import WhisperModel
 from config import SAMPLE_RATE, CHUNK, SILENCIO_MAX, DURACION_MAX, UMBRAL_RMS, TEMP_WAV, GROQ_API_KEY, WAKE_WORD_MODEL, WAKE_WORD_TARGET
 
-model      = None
-umbral     = UMBRAL_RMS
-_oww_model = None
+model       = None
+umbral      = UMBRAL_RMS
+_oww_model  = None
+nivel_audio: float = 0.0   # RMS normalizado 0.0-1.0 para el waveform de la GUI
 _OWW_CHUNK = 1280   # 80 ms a 16 kHz
 _OWW_SCORE = 0.5    # umbral de activación
 
@@ -198,12 +199,14 @@ def escuchar():
     chunks_silencio = 0
     frames          = []
 
+    global nivel_audio
     print("[ Escuchando... ]", flush=True)
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             for _ in range(chunks_max):
                 chunk, _ = stream.read(chunk_samples)
                 energia = _rms(chunk)
+                nivel_audio = min(1.0, float(energia) / max(umbral * 2, 1))
 
                 if not grabando:
                     if energia > umbral:
@@ -222,6 +225,7 @@ def escuchar():
         print(f"[ Error de micrófono: {e} ]")
         return "", None
 
+    nivel_audio = 0.0
     if not frames:
         print("[ Sin voz detectada ]")
         return "", None

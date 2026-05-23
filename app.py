@@ -8,6 +8,7 @@ import queue
 import socket
 import sys
 import threading
+import time
 import webbrowser
 import tkinter as tk
 import tkinter.messagebox as _mb
@@ -143,6 +144,7 @@ if __name__ == "__main__":
             self._set_window_icon()
             self._poll_log()
             self._animar_dot()
+            self._animar_wave()
 
         # ── UI ────────────────────────────────────────────────────────────────
 
@@ -183,6 +185,20 @@ if __name__ == "__main__":
                                             font=ctk.CTkFont("Segoe UI", 10),
                                             text_color=_DIM)
             self._lbl_estado.pack(side="left")
+
+            # Waveform — 18 barras dentro de la card
+            _N, _BW, _CH, _CW = 18, 3, 28, 268
+            self._wave_cv = tk.Canvas(card, width=_CW, height=_CH,
+                                      bg=_PANEL, highlightthickness=0)
+            self._wave_cv.pack(pady=(0, 10))
+            _gap = _CW / _N
+            self._wave_bars = []
+            for i in range(_N):
+                cx = i * _gap + _gap / 2
+                bar = self._wave_cv.create_rectangle(
+                    cx - _BW / 2, _CH - 2, cx + _BW / 2, _CH,
+                    fill=_BORDE, outline="")
+                self._wave_bars.append(bar)
 
             # Botón principal
             self._btn = ctk.CTkButton(self,
@@ -381,6 +397,34 @@ if __name__ == "__main__":
                     self._dot,
                     fill=self._dot_on if self._pulso else self._dot_off)
             self.after(500, self._animar_dot)
+
+        def _animar_wave(self):
+            _CH   = 28
+            _BMIN = 2
+            _BMAX = 26
+            try:
+                import modules.stt as _stt
+                nivel = getattr(_stt, "nivel_audio", 0.0) if self._pulsar else 0.0
+            except Exception:
+                nivel = 0.0
+
+            now = time.time()
+            for i, bar in enumerate(self._wave_bars):
+                if nivel > 0.02:
+                    phase = now * 9 + i * 0.65
+                    wave  = (math.sin(phase) + 1) / 2
+                    h = int(_BMIN + wave * nivel * (_BMAX - _BMIN))
+                    color = _VERDE
+                else:
+                    h = _BMIN
+                    color = _BORDE
+                coords = self._wave_cv.coords(bar)
+                if coords:
+                    x1, _, x2, _ = coords
+                    self._wave_cv.coords(bar, x1, _CH - h, x2, _CH)
+                    self._wave_cv.itemconfig(bar, fill=color)
+
+            self.after(50, self._animar_wave)
 
         # ── Control ───────────────────────────────────────────────────────────
 
