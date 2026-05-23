@@ -5,10 +5,12 @@ Splash inmediato → imports pesados en background → ventana principal.
 import math
 import os
 import queue
+import socket
 import sys
 import threading
 import webbrowser
 import tkinter as tk
+import tkinter.messagebox as _mb
 from datetime import datetime
 
 # ── Paleta ────────────────────────────────────────────────────────────────────
@@ -65,6 +67,19 @@ def _splash() -> tk.Tk:
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # Instancia única — el socket queda abierto hasta que el proceso muere
+    _lock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        _lock.bind(("127.0.0.1", 47291))
+    except OSError:
+        _r = tk.Tk()
+        _r.withdraw()
+        _mb.showinfo("Imai",
+                     "Imai ya está en ejecución.\n"
+                     "Búscalo en la bandeja del sistema (esquina inferior derecha).")
+        _r.destroy()
+        sys.exit(0)
+
     splash = _splash()           # visible de inmediato
 
     # Imports pesados — el usuario ve el splash mientras cargan
