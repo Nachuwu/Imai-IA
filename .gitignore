@@ -1,12 +1,27 @@
+# Secretos y configuración local
 .env
-__pycache__/
-*.pyc
-*.pyo
-venv/
+
+# Datos privados y generados en tiempo de ejecución
 data/
-audio/temp.wav
-audio/respuesta.mp3
+audio/
 historial/
 chroma_db/
 models/
 wake_word_data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Entorno virtual
+venv/
+.venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.code-workspace

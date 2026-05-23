@@ -88,38 +88,42 @@ def _rms(chunk):
     return np.sqrt(np.mean(chunk.astype(np.float32) ** 2))
 
 def _transcribir(archivo):
-    """Retorna (texto, idioma_iso) donde idioma puede ser None si no se detecta."""
+    """Retorna (texto, 'es') — siempre en español."""
     if _groq_client:
         try:
             with open(archivo, "rb") as f:
                 resultado = _groq_client.audio.transcriptions.create(
                     file=(os.path.basename(archivo), f.read()),
                     model="whisper-large-v3",
-                    response_format="verbose_json",
+                    response_format="text",
+                    language="es",
                 )
-            return resultado.text.strip(), getattr(resultado, "language", None)
+            return resultado.strip(), "es"
         except Exception as e:
             print(f"[ Groq STT falló, usando local: {e} ]")
 
-    segs, info = model.transcribe(archivo)
-    return " ".join(s.text for s in segs).strip(), getattr(info, "language", None)
+    segs, _ = model.transcribe(archivo, language="es")
+    return " ".join(s.text for s in segs).strip(), "es"
 
 _WAKE_TARGET = WAKE_WORD_TARGET
-_WAKE_FUZZY_THRESHOLD = 75  # similitud mínima (0-100) para considerar match
+_WAKE_FUZZY_THRESHOLD = 82  # similitud mínima (0-100) para considerar match
 
 def _es_wake_word(texto):
-    """Devuelve True si el texto contiene 'imai' o algo muy similar."""
+    """Devuelve True si el texto contiene la wake word o algo muy similar."""
     from rapidfuzz.distance import Levenshtein
     texto = _sin_acentos(texto.lower().strip())
     if _WAKE_TARGET in texto:
         return True
-    # Comparar cada palabra del texto con "imai"
+    target_len = len(_WAKE_TARGET)
     for palabra in texto.split():
         palabra = palabra.strip(".,;:!?¿¡")
         if not palabra:
             continue
-        # similitud como porcentaje basado en distancia Levenshtein
-        max_len = max(len(palabra), len(_WAKE_TARGET))
+        # Ignorar palabras que sean menos del 85% de la longitud del target
+        # Evita que "escucha" (7) active "escuchame" (9)
+        if len(palabra) < target_len * 0.85:
+            continue
+        max_len = max(len(palabra), target_len)
         dist    = Levenshtein.distance(palabra, _WAKE_TARGET)
         sim     = (1 - dist / max_len) * 100
         if sim >= _WAKE_FUZZY_THRESHOLD:

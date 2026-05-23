@@ -67,6 +67,8 @@ _PATRONES = {
                r"sin sonido|activa (el )?sonido|pon(lo|la)? (al|en) \d+)\b",
     "buscar": r"\b(busca|encuentra|d[oó]nde est[aá]|buscar archivo|busca el|busca la)\b",
     "repetir": r"\b(repite|rep[íi]telo|dilo de nuevo|no (te |lo )?(escuch[eé]|o[íi]|entend[íi])|no esc|otra vez|m[aá]s despacio|qu[eé] dijiste|qu[eé] dijo)\b",
+    "dictar_inicio": r"\b(empieza|comienza|modo|inicia)\s*(a\s*)?(dictar|dictado)\b",
+    "dictar_fin":    r"\b(para|detener|terminar|salir|fin)\s*(de\s*)?(dictar|dictado)\b",
 }
 
 # Palabras a ignorar al extraer el objeto de la frase

@@ -6,7 +6,9 @@ import json
 import os
 import glob
 import threading
-from flask import Flask, jsonify, render_template_string
+import time
+import cv2
+from flask import Flask, jsonify, render_template_string, Response
 from config import DATA_DIR
 
 _ROOT     = os.path.join(os.path.dirname(__file__), "..")
@@ -24,6 +26,7 @@ _HTML = """<!DOCTYPE html>
 body { font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
 h1  { color: #58a6ff; font-size: 1.4rem; margin-bottom: 20px; letter-spacing: 1px; }
 .grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+.cam  { width: 100%; border-radius: 8px; background: #000; display: block; }
 .col  { display: flex; flex-direction: column; gap: 16px; }
 .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 18px; }
 .card h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-bottom: 12px; }
@@ -55,10 +58,16 @@ h1  { color: #58a6ff; font-size: 1.4rem; margin-bottom: 20px; letter-spacing: 1p
       <div id="recordatorios"><span class="empty">Cargando...</span></div>
     </div>
   </div>
-  <div class="card">
-    <h2>Historial reciente</h2>
-    <input id="buscar" class="search" type="text" placeholder="Buscar en historial...">
-    <div id="historial"><span class="empty">Cargando...</span></div>
+  <div class="col" style="gap:16px">
+    <div class="card">
+      <h2>Cámara</h2>
+      <img class="cam" src="/video_feed" alt="Sin señal">
+    </div>
+    <div class="card">
+      <h2>Historial reciente</h2>
+      <input id="buscar" class="search" type="text" placeholder="Buscar en historial...">
+      <div id="historial"><span class="empty">Cargando...</span></div>
+    </div>
   </div>
 </div>
 <p class="refresh">Actualización automática cada 20 s</p>
@@ -131,6 +140,20 @@ def api_recordatorios():
         return jsonify([{"mensaje": v["mensaje"], "cuando": v["cuando"]} for v in datos.values()])
     except Exception:
         return jsonify([])
+
+
+@app.route("/video_feed")
+def video_feed():
+    import modules.camara as _cam
+    def _generar():
+        while True:
+            frame = _cam.get_frame()
+            if frame is not None:
+                _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                       + buf.tobytes() + b"\r\n")
+            time.sleep(0.05)
+    return Response(_generar(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/api/historial")

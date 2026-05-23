@@ -1,5 +1,7 @@
 import re
+import os
 import sys
+import json
 import time
 import subprocess
 from modules.stt import escuchar, inicializar as inicializar_stt, esta_pausado, esperar_wake_word
@@ -16,10 +18,65 @@ from modules.claude_llm import consultar as claude_consultar
 from modules.rag import indexar_historial, buscar as rag_buscar, es_consulta_historial
 import modules.recordatorios as recordatorios
 import modules.dashboard as dashboard
+import modules.camara as camara
+from modules.contexto import get_app_activa
 from config import CIUDAD, WAKE_WORD
 
 MAX_TURNOS = 10
-_ultima_respuesta = ""
+_ultima_respuesta   = ""
+_dictando           = False
+_ultimo_clipboard   = ""
+_oraciones_habladas = 0
+_MAX_ORACIONES      = 3
+
+# ---------------------------------------------------------------------------
+# Dictar — tabla de sustituciones de voz a símbolo
+# ---------------------------------------------------------------------------
+
+_DICTAR_SUBS = [
+    (re.compile(r"\bpunto y coma\b",          re.I), ";"),
+    (re.compile(r"\bdos puntos\b",             re.I), ":"),
+    (re.compile(r"\bnueva\s+l[ií]nea\b",       re.I), "\n"),
+    (re.compile(r"\bnuevo\s+p[aá]rrafo\b",     re.I), "\n\n"),
+    (re.compile(r"\babre\s+par[eé]ntesis\b",   re.I), "("),
+    (re.compile(r"\bcierra\s+par[eé]ntesis\b", re.I), ")"),
+    (re.compile(r"\bgu[ií][oó]n\b",            re.I), "-"),
+    (re.compile(r"\binterrogaci[oó]n\b",       re.I), "?"),
+    (re.compile(r"\bexclamaci[oó]n\b",         re.I), "!"),
+    (re.compile(r"\bcomillas\b",               re.I), '"'),
+    (re.compile(r"\bcoma\b",                   re.I), ","),
+    (re.compile(r"\bpunto\b",                  re.I), "."),
+]
+
+def _aplicar_subs_dictar(txt):
+    for pat, rep in _DICTAR_SUBS:
+        txt = pat.sub(rep, txt)
+    return txt
+
+# ---------------------------------------------------------------------------
+# Historial persistente entre sesiones
+# ---------------------------------------------------------------------------
+
+_HISTORIAL_SESION   = os.path.join(os.path.dirname(__file__), "data", "historial_sesion.json")
+_MAX_TURNOS_SESION  = 6  # 3 turnos completos (user+assistant × 3)
+
+def _cargar_historial_sesion():
+    try:
+        if os.path.exists(_HISTORIAL_SESION):
+            with open(_HISTORIAL_SESION, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def _guardar_historial_sesion(historial):
+    try:
+        mensajes = [m for m in historial if m["role"] != "system"][-_MAX_TURNOS_SESION:]
+        os.makedirs(os.path.dirname(_HISTORIAL_SESION), exist_ok=True)
+        with open(_HISTORIAL_SESION, "w", encoding="utf-8") as f:
+            json.dump(mensajes, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 _SEP_COMANDOS = re.compile(
     r'\s+(?:y|luego|despu[eé]s|tambi[eé]n|adem[aá]s)\s+',
@@ -164,6 +221,12 @@ def manejar_herramienta(texto):
             hablar("¿Qué quieres que recuerde?")
         return True, intent, objeto
 
+    if intent == "dictar_inicio":
+        global _dictando
+        _dictando = True
+        hablar("Modo dictar activado. Habla y escribiré.")
+        return True, intent, objeto
+
     return False, intent, objeto
 
 # ---------------------------------------------------------------------------
@@ -176,10 +239,11 @@ def _hablar_y_recordar(texto):
     hablar(texto)
 
 def _hablar_streaming(oracion):
-    global _ultima_respuesta
+    global _ultima_respuesta, _oraciones_habladas
     _ultima_respuesta = oracion
-    if not fue_interrumpido():
+    if _oraciones_habladas < _MAX_ORACIONES and not fue_interrumpido():
         hablar(oracion)
+        _oraciones_habladas += 1
 
 def _resumen_matutino():
     import modules.calendario as calendario
@@ -199,6 +263,7 @@ def _resumen_matutino():
 
 
 def main():
+    global _dictando, _ultimo_clipboard, _oraciones_habladas
     limpiar()
     print("=" * 40)
     print("        IMAI  —  delta Crucis")
@@ -213,9 +278,14 @@ def main():
     memoria.indexar_existentes()
     recordatorios.inicializar(hablar)
     dashboard.iniciar()
+    camara.iniciar()
 
     system_prompt = get_system_prompt()
     historial = [{"role": "system", "content": system_prompt}]
+    sesion_previa = _cargar_historial_sesion()
+    if sesion_previa:
+        historial.extend(sesion_previa)
+        print(f"[ Historial previo: {len(sesion_previa) // 2} turnos cargados ]")
     _resumen_matutino()
 
     import winsound
@@ -227,13 +297,16 @@ def main():
                 time.sleep(0.5)
                 continue
             if WAKE_WORD == "1":
-                if _turnos_conv > 0:
+                if _dictando:
+                    pass  # en modo dictar siempre escucha sin wake word
+                elif _turnos_conv > 0:
                     _turnos_conv -= 1
                     winsound.Beep(660, 80)   # beep suave = modo conversación activo
                 else:
                     esperar_wake_word()
                     winsound.Beep(880, 120)  # beep alto = wake word detectado
-            texto, idioma = escuchar()
+            app_activa = get_app_activa()
+            texto, _ = escuchar()
         except KeyboardInterrupt:
             hablar("Hasta luego.")
             break
@@ -246,6 +319,21 @@ def main():
         if "salir" in texto.lower():
             hablar("Hasta luego.")
             break
+
+        # Modo dictar — escribe directamente en la app activa
+        if _dictando:
+            if re.search(r"\b(para|detener|terminar|salir|fin)\s*(de\s*)?(dictar|dictado)\b", texto, re.IGNORECASE):
+                _dictando = False
+                hablar("Modo dictar desactivado.")
+            else:
+                txt_proc = _aplicar_subs_dictar(texto)
+                partes   = txt_proc.split("\n")
+                for i, parte in enumerate(partes):
+                    if parte.strip():
+                        tools.escribir_teclado(parte)
+                    if i < len(partes) - 1:
+                        tools.presionar_tecla("enter")
+            continue
 
         # Fast path — ejecuta los comandos que reconoce, acumula el resto para LLM
         textos    = _split_comandos(texto)
@@ -276,16 +364,26 @@ def main():
         historial = _truncar_historial(historial)
 
         contenido_usuario = texto
-        if idioma and idioma != "es":
-            contenido_usuario = f"[Responde en {idioma}]\n{texto}"
+        if app_activa:
+            contenido_usuario = f"[App activa: {app_activa}]\n{contenido_usuario}"
         if es_consulta_historial(texto):
             fragmentos = rag_buscar(texto, n=3)
             if fragmentos:
                 contexto = "\n---\n".join(fragmentos)
                 contenido_usuario = f"Contexto de conversaciones anteriores:\n{contexto}\n\nPregunta: {contenido_usuario}"
 
+        try:
+            import pyperclip as _pc
+            _clip = _pc.paste()
+            if _clip and _clip != _ultimo_clipboard and not _clip.startswith("http") and len(_clip) > 10:
+                _ultimo_clipboard = _clip
+                contenido_usuario = f"[Texto seleccionado: {_clip[:500]}]\n{contenido_usuario}"
+        except Exception:
+            pass
+
         historial.append({"role": "user", "content": contenido_usuario})
 
+        _oraciones_habladas = 0
         try:
             respuesta, tool_calls = claude_consultar(historial, hablar_cb=_hablar_streaming)
         except Exception as e:
@@ -317,6 +415,7 @@ def main():
                     intent=nombre, objeto=str(args), herramienta=True,
                 )
             historial.append({"role": "assistant", "content": " ".join(resultados)})
+            _guardar_historial_sesion(historial)
             if nombre not in ("actualizar_memoria", "guardar_memoria"):
                 _turnos_conv = 2
             continue
@@ -328,6 +427,7 @@ def main():
 
         historial.append({"role": "assistant", "content": respuesta})
         _turnos_conv = 2
+        _guardar_historial_sesion(historial)
         log.guardar(
             messages=historial[-(MAX_TURNOS * 2):],
             intent="ninguna",

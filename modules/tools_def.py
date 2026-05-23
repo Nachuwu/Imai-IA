@@ -2,6 +2,19 @@
 Dispatcher que mapea nombre de tool → implementación real.
 Las definiciones de herramientas están en modules/claude_llm.py (formato Anthropic).
 """
+import re as _re
+
+
+def _confirmar(pregunta, hablar_cb):
+    """Pregunta en voz alta y escucha sí/no. Retorna True si el usuario confirma."""
+    from modules.stt import escuchar
+    if hablar_cb:
+        hablar_cb(pregunta + " Di sí o no.")
+    try:
+        resp, _ = escuchar()
+        return bool(_re.search(r"\b(s[ií]|yes|dale|adelante|confirma|ok|claro|seguro)\b", resp.lower()))
+    except Exception:
+        return False
 
 
 def ejecutar(nombre, args, hablar_cb=None):
@@ -147,6 +160,13 @@ def ejecutar(nombre, args, hablar_cb=None):
     if nombre == "historial_spotify":
         return _t.historial_spotify(args.get("n", 10))
 
+    # --- Cámara ---
+    if nombre == "ver_camara":
+        return _t.ver_camara(args.get("pregunta", "¿Cómo está la persona?"))
+
+    if nombre == "describir_entorno":
+        return _t.describir_entorno(args.get("pregunta", "¿Qué hay en el entorno?"))
+
     # --- Control de mouse/teclado ---
     if nombre == "control_input":
         accion = args.get("accion")
@@ -164,8 +184,11 @@ def ejecutar(nombre, args, hablar_cb=None):
 
     if nombre == "enviar_correo":
         import modules.gmail as _gmail
+        dest = args.get("destinatario", "")
+        if not _confirmar(f"¿Envío el correo a {dest}?", hablar_cb):
+            return "De acuerdo, cancelado."
         return _gmail.enviar_correo(
-            args.get("destinatario", ""),
+            dest,
             args.get("asunto", ""),
             args.get("cuerpo", ""),
         )
@@ -177,6 +200,9 @@ def ejecutar(nombre, args, hablar_cb=None):
 
     if nombre == "control_pc":
         accion = args.get("accion")
+        if accion in ("apagar", "reiniciar", "suspender"):
+            if not _confirmar(f"¿Seguro que quieres {accion} el PC?", hablar_cb):
+                return "De acuerdo, cancelado."
         if accion == "apagar":        return _t.apagar_pc()
         if accion == "reiniciar":     return _t.reiniciar_pc()
         if accion == "bloquear":      return _t.bloquear_pantalla()
@@ -199,6 +225,10 @@ def ejecutar(nombre, args, hablar_cb=None):
     # --- Analizar pantalla ---
     if nombre == "analizar_pantalla":
         return _t.analizar_pantalla(args.get("pregunta", "¿Qué hay en esta pantalla?"))
+
+    # --- Leer URL ---
+    if nombre == "leer_url":
+        return _t.leer_url(args.get("url"), args.get("pregunta"))
 
     # --- Calendario ---
     if nombre == "calendario_hoy":

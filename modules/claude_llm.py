@@ -287,6 +287,28 @@ CLAUDE_TOOLS = [
         },
     },
     {
+        "name": "ver_camara",
+        "description": "Captura un frame de la webcam y analiza a la persona frente a ella. Úsalo cuando el usuario pregunte sobre sí mismo: '¿cómo estoy?', '¿parezco cansado?', '¿qué ropa tengo?', '¿qué cara estoy poniendo?'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pregunta": {"type": "string", "description": "Qué quieres saber sobre la persona"},
+            },
+            "required": ["pregunta"],
+        },
+    },
+    {
+        "name": "describir_entorno",
+        "description": "Captura un frame de la webcam y analiza el entorno físico. Úsalo cuando el usuario pregunte sobre su alrededor: '¿qué hay en mi escritorio?', '¿qué ves detrás de mí?', '¿cómo está la habitación?'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pregunta": {"type": "string", "description": "Qué quieres saber sobre el entorno"},
+            },
+            "required": ["pregunta"],
+        },
+    },
+    {
         "name": "control_input",
         "description": "Controla el mouse y teclado: escribir texto, presionar teclas, hacer scroll, hacer clic en coordenadas o buscar y hacer clic en un elemento de la pantalla por su texto.",
         "input_schema": {
@@ -379,6 +401,17 @@ CLAUDE_TOOLS = [
                 "duracion_min": {"type": "integer", "description": "Duración en minutos (default 60)"},
             },
             "required": ["titulo", "cuando"],
+        },
+    },
+    {
+        "name": "leer_url",
+        "description": "Lee y resume el contenido de una página web, o responde una pregunta específica sobre su contenido. Úsalo cuando el usuario diga 'léeme esto', 'resume esta página', 'qué dice aquí', 'de qué trata esto', 'explícame la sección de X'. Si Chrome, Edge o Firefox está activo, captura la URL automáticamente.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url":      {"type": "string", "description": "URL completa a leer. Si se omite, se captura del navegador activo."},
+                "pregunta": {"type": "string", "description": "Pregunta específica sobre el contenido, ej: 'explícame los precios' o 'cuál es la conclusión'. Si se omite, resume el artículo."},
+            },
         },
     },
 ]

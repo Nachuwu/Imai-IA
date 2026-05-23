@@ -298,7 +298,8 @@ def buscar_web(query):
                 return texto[:400]
         return f"No encontré información directa sobre {query}."
     except Exception as e:
-        return f"No pude buscar ahora mismo: {e}"
+        print(f"[ buscar_web error: {e} ]")
+        return "No pude conectarme al buscador ahora mismo."
 
 # ---------------------------------------------------------------------------
 # Captura de pantalla
@@ -318,18 +319,21 @@ def captura_pantalla():
         ruta = _captura_ruta()
         return f"Captura guardada como {os.path.basename(ruta)}."
     except Exception as e:
-        return f"No pude tomar la captura: {e}"
+        print(f"[ captura_pantalla error: {e} ]")
+        return "No pude tomar la captura de pantalla."
 
 def analizar_pantalla(pregunta="¿Qué hay en esta pantalla?"):
     try:
         ruta = _captura_ruta()
     except Exception as e:
-        return f"No pude tomar la captura: {e}"
+        print(f"[ captura_ruta error: {e} ]")
+        return "No pude tomar la captura de pantalla."
     try:
         from modules.claude_llm import analizar_imagen
         return analizar_imagen(ruta, pregunta)
     except Exception as e:
-        return f"No pude analizar la pantalla: {e}"
+        print(f"[ analizar_pantalla error: {e} ]")
+        return "No pude analizar la pantalla."
 
 # ---------------------------------------------------------------------------
 # Notificaciones de escritorio
@@ -459,7 +463,8 @@ def controlar_ventana(accion, titulo=None):
         if accion == "enfocar":
             win.activate();  return f"Cambié a '{nombre}'."
     except Exception as e:
-        return f"No pude controlar la ventana: {e}"
+        print(f"[ controlar_ventana error: {e} ]")
+        return "No pude controlar esa ventana."
 
     return f"Acción '{accion}' no reconocida."
 
@@ -561,31 +566,148 @@ def click_en(x, y):
     _pag.click(x, y)
     return f"Clic en ({x}, {y})."
 
-def click_en_texto(texto):
-    """Toma captura, usa Claude Vision para encontrar el elemento y hace clic."""
-    import tempfile
+def ver_camara(pregunta="¿Cómo está la persona frente a la cámara?"):
+    """Analiza al usuario usando el último frame de la cámara."""
+    import modules.camara as _cam
     from modules.claude_llm import analizar_imagen
+    ruta = _cam.guardar_frame_tmp()
+    if ruta is None:
+        return "La cámara no está lista todavía."
+    try:
+        return analizar_imagen(ruta, pregunta + " Enfócate en la persona: expresión, postura, estado de ánimo, ropa.")
+    except Exception as ex:
+        print(f"[ ver_camara error: {ex} ]")
+        return "No pude analizar la imagen de la cámara."
+
+def describir_entorno(pregunta="¿Qué hay en el entorno?"):
+    """Analiza el entorno usando el último frame de la cámara."""
+    import modules.camara as _cam
+    from modules.claude_llm import analizar_imagen
+    ruta = _cam.guardar_frame_tmp()
+    if ruta is None:
+        return "La cámara no está lista todavía."
+    try:
+        return analizar_imagen(ruta, pregunta + " Enfócate en el entorno: objetos, habitación, fondo, iluminación.")
+    except Exception as ex:
+        print(f"[ describir_entorno error: {ex} ]")
+        return "No pude analizar el entorno."
+
+def click_en_texto(texto):
+    """
+    Usa Ctrl+F para resaltar el texto en pantalla, toma screenshot con el
+    resaltado activo y manda a Vision para localizar con mayor precisión.
+    """
+    import tempfile, time as _t2
+    from modules.claude_llm import analizar_imagen
+
+    # Resaltar el texto con Ctrl+F (el navegador/app lo destaca en amarillo)
+    _pag.hotkey("ctrl", "f")
+    _t2.sleep(0.35)
+    _pag.hotkey("ctrl", "a")          # limpiar búsqueda anterior
+    _pag.typewrite(texto[:40], interval=0.04)
+    _t2.sleep(0.5)
+
+    # Screenshot CON el texto resaltado visible
     img = ImageGrab.grab()
-    w, h = img.size
+    w_img, h_img = img.size
+    w_pag, h_pag = _pag.size()
+    sx = w_pag / w_img
+    sy = h_pag / h_img
+
+    # Cerrar barra de búsqueda
+    _pag.press("escape")
+    _t2.sleep(0.1)
+
+    # Redimensionar a 1280px max ancho — Vision es más preciso con imágenes estándar
+    if w_img > 1280:
+        factor = 1280 / w_img
+        img = img.resize((1280, int(h_img * factor)))
+    else:
+        factor = 1.0
+    w_vis, h_vis = img.size
+
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         img.save(f.name)
         ruta = f.name
     try:
         pregunta = (
-            f"Busca el elemento de interfaz con el texto o ícono '{texto}' "
-            f"en esta pantalla de {w}x{h} píxeles. "
-            f"Responde ÚNICAMENTE con las coordenadas del centro en formato 'x,y'. "
-            f"Si no lo encuentras, responde 'no encontrado'."
+            f"Captura de pantalla de {w_vis}x{h_vis} píxeles. "
+            f"Busca el texto '{texto}' — está resaltado en amarillo/naranja por una búsqueda activa. "
+            f"Da las coordenadas X,Y del centro de ese elemento resaltado. "
+            f"Formato: '542,387' (solo dos números, coma, sin espacios). "
+            f"Si no lo ves: 'no encontrado'."
         )
         respuesta = analizar_imagen(ruta, pregunta).strip().lower()
     finally:
         os.unlink(ruta)
 
-    if "no encontrado" in respuesta or "no" in respuesta and "," not in respuesta:
+    if "no encontrado" in respuesta or ("no" in respuesta and "," not in respuesta):
         return f"No encontré '{texto}' en pantalla."
     m = re.search(r"(\d+)\s*,\s*(\d+)", respuesta)
     if not m:
         return f"No pude interpretar la posición de '{texto}'."
-    x, y = int(m.group(1)), int(m.group(2))
+
+    # Revertir resize y aplicar escala DPI
+    x = int(int(m.group(1)) / factor * sx)
+    y = int(int(m.group(2)) / factor * sy)
+    print(f"[ click_en_texto: → ({x},{y}) factor={factor:.2f} escala={sx:.2f},{sy:.2f} ]")
     _pag.click(x, y)
     return f"Hice clic en '{texto}'."
+
+# ---------------------------------------------------------------------------
+# Leer artículos y páginas web
+# ---------------------------------------------------------------------------
+
+def leer_url(url=None, pregunta=None):
+    """Descarga una URL, extrae el texto y devuelve un resumen o responde una pregunta."""
+    import time as _time
+    if not url:
+        try:
+            import pygetwindow as gw
+            win = gw.getActiveWindow()
+            _NAVEGADORES = ("chrome", "edge", "firefox", "opera", "brave", "safari")
+            if win and any(n in win.title.lower() for n in _NAVEGADORES):
+                _pag.hotkey("ctrl", "l")
+                _time.sleep(0.35)
+                _pag.hotkey("ctrl", "a")
+                _time.sleep(0.1)
+                _pag.hotkey("ctrl", "c")
+                _time.sleep(0.3)
+                url = pyperclip.paste().strip()
+        except Exception:
+            pass
+
+    if not url or not url.startswith("http"):
+        return "No encontré una URL. Dime qué página quieres leer."
+
+    try:
+        from bs4 import BeautifulSoup
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+        contenido = soup.get_text(separator=" ", strip=True)[:3000]
+    except Exception as e:
+        print(f"[ leer_url error: {e} ]")
+        return "No pude acceder a esa página web."
+
+    if not contenido:
+        return "No pude extraer texto de esa página."
+
+    try:
+        from modules.claude_llm import _get_client
+        from config import CLAUDE_MODEL
+        client = _get_client()
+        if pregunta:
+            prompt_texto = f"Basándote en este texto, responde en 2 oraciones en español, sin markdown: {pregunta}\n\nTexto:\n{contenido}"
+        else:
+            prompt_texto = f"Resume este texto en 2 oraciones en español, sin markdown:\n\n{contenido}"
+        r = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt_texto}],
+        )
+        return r.content[0].text.strip()
+    except Exception:
+        return contenido[:300] + "..."
