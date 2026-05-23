@@ -110,126 +110,133 @@ def _truncar_historial(historial):
 # Fast path — regex para comandos claros sin pasar por el LLM
 # ---------------------------------------------------------------------------
 
+def _decir(msg):
+    """hablar + print para que el chat de la GUI lo muestre."""
+    if msg:
+        print(f"Imai: {msg}")
+    hablar(msg)
+
+
 def manejar_herramienta(texto):
     intent, objeto = detectar(texto)
 
     if intent == "abrir":
         key = apps.abrir(objeto or "")
-        hablar(f"Abriendo {key}." if key else f"No encontré {objeto}.")
+        _decir(f"Abriendo {key}." if key else f"No encontré {objeto}.")
         return True, intent, objeto
 
     if intent == "cerrar":
         key = apps.cerrar(objeto or "")
-        hablar(f"Cerrando {key}." if key else f"No encontré {objeto} ejecutándose.")
+        _decir(f"Cerrando {key}." if key else f"No encontré {objeto} ejecutándose.")
         return True, intent, objeto
 
     if intent == "volumen":
-        if isinstance(objeto, int):   hablar(tools.set_volumen(objeto))
-        elif objeto == "subir":       hablar(tools.subir_volumen())
-        elif objeto == "bajar":       hablar(tools.bajar_volumen())
-        elif objeto == "silenciar":   hablar(tools.silenciar())
-        elif objeto == "activar":     hablar(tools.activar_sonido())
-        else:                         hablar(tools.get_volumen())
+        if isinstance(objeto, int):   _decir(tools.set_volumen(objeto))
+        elif objeto == "subir":       _decir(tools.subir_volumen())
+        elif objeto == "bajar":       _decir(tools.bajar_volumen())
+        elif objeto == "silenciar":   _decir(tools.silenciar())
+        elif objeto == "activar":     _decir(tools.activar_sonido())
+        else:                         _decir(tools.get_volumen())
         return True, intent, objeto
 
     if intent == "timer":
         if objeto:
             def _cb(msg):
                 tools.notificar("Imai — Timer", msg)
-                hablar(msg)
-            hablar(tools.crear_timer(objeto, _cb))
+                _decir(msg)
+            _decir(tools.crear_timer(objeto, _cb))
         else:
-            hablar("¿De cuántos segundos o minutos el timer?")
+            _decir("¿De cuántos segundos o minutos el timer?")
         return True, intent, objeto
 
     if intent == "buscar":
-        hablar(f"Buscando {objeto}.")
-        tools.buscar_archivos(objeto or "", callback=hablar)
+        _decir(f"Buscando {objeto}.")
+        tools.buscar_archivos(objeto or "", callback=_decir)
         return True, intent, objeto
 
     if intent == "hora":
-        hablar(tools.get_hora())
+        _decir(tools.get_hora())
         return True, intent, objeto
 
     if intent == "fecha":
-        hablar(tools.get_fecha())
+        _decir(tools.get_fecha())
         return True, intent, objeto
 
     if intent == "clima":
-        hablar(tools.get_clima(objeto or CIUDAD))
+        _decir(tools.get_clima(objeto or CIUDAD))
         return True, intent, objeto
 
     if intent == "calcular":
         if objeto:
             r = tools.calcular(objeto)
-            hablar(f"{r}." if r else "No pude calcular eso.")
+            _decir(f"{r}." if r else "No pude calcular eso.")
         else:
-            hablar("¿Qué quieres calcular?")
+            _decir("¿Qué quieres calcular?")
         return True, intent, objeto
 
     if intent == "portapapeles":
-        hablar(tools.get_portapapeles())
+        _decir(tools.get_portapapeles())
         return True, intent, objeto
 
     if intent == "captura":
-        hablar(tools.captura_pantalla())
+        _decir(tools.captura_pantalla())
         return True, intent, objeto
 
     if intent == "spotify":
-        if objeto == "siguiente":   hablar(tools.spotify_siguiente())
-        elif objeto == "anterior":  hablar(tools.spotify_anterior())
-        elif objeto == "pausa":     hablar(tools.spotify_play_pause())
-        elif objeto == "parar":     hablar(tools.spotify_parar())
-        elif objeto == "que_suena": hablar(tools.get_cancion_spotify())
-        else:                       hablar(tools.spotify_play_pause())
+        if objeto == "siguiente":   _decir(tools.spotify_siguiente())
+        elif objeto == "anterior":  _decir(tools.spotify_anterior())
+        elif objeto == "pausa":     _decir(tools.spotify_play_pause())
+        elif objeto == "parar":     _decir(tools.spotify_parar())
+        elif objeto == "que_suena": _decir(tools.get_cancion_spotify())
+        else:                       _decir(tools.spotify_play_pause())
         return True, intent, objeto
 
     if intent == "brillo":
-        if isinstance(objeto, int): hablar(tools.set_brillo(objeto))
-        elif objeto == "subir":     hablar(tools.subir_brillo())
-        elif objeto == "bajar":     hablar(tools.bajar_brillo())
-        else:                       hablar(tools.get_brillo())
+        if isinstance(objeto, int): _decir(tools.set_brillo(objeto))
+        elif objeto == "subir":     _decir(tools.subir_brillo())
+        elif objeto == "bajar":     _decir(tools.bajar_brillo())
+        else:                       _decir(tools.get_brillo())
         return True, intent, objeto
 
     if intent == "url":
-        hablar(urls.manejar(objeto or texto))
+        _decir(urls.manejar(objeto or texto))
         return True, intent, objeto
 
     if intent == "no_molestar":
         if objeto:
             from modules.stt import pausar as _pausar
             _pausar(objeto)
-            def _reanudar(msg): hablar("Ya puedes hablarme.")
+            def _reanudar(msg): _decir("Ya puedes hablarme.")
             tools.crear_timer(objeto, _reanudar)
-            hablar(f"De acuerdo, silencio por {tools._fmt_tiempo(objeto)}.")
+            _decir(f"De acuerdo, silencio por {tools._fmt_tiempo(objeto)}.")
         else:
-            hablar("¿Por cuánto tiempo?")
+            _decir("¿Por cuánto tiempo?")
         return True, intent, objeto
 
     if intent == "cancelar_timer":
-        hablar(tools.cancelar_timer())
+        _decir(tools.cancelar_timer())
         return True, intent, objeto
 
     if intent == "repetir":
         if _ultima_respuesta:
-            hablar(_ultima_respuesta)
+            _decir(_ultima_respuesta)
         else:
-            hablar("No tengo nada que repetir todavía.")
+            _decir("No tengo nada que repetir todavía.")
         return True, intent, objeto
 
     if intent == "memoria":
         hecho = memoria.extraer_hecho(texto)
         if hecho:
             memoria.agregar(hecho)
-            hablar(f"Anotado: {hecho}.")
+            _decir(f"Anotado: {hecho}.")
         else:
-            hablar("¿Qué quieres que recuerde?")
+            _decir("¿Qué quieres que recuerde?")
         return True, intent, objeto
 
     if intent == "dictar_inicio":
         global _dictando
         _dictando = True
-        hablar("Modo dictar activado. Habla y escribiré.")
+        _decir("Modo dictar activado. Habla y escribiré.")
         return True, intent, objeto
 
     return False, intent, objeto
@@ -265,7 +272,7 @@ def _resumen_matutino():
             partes.append(eventos)
     except Exception:
         pass
-    hablar(" ".join(partes))
+    _decir(" ".join(partes))
 
 
 def main():
@@ -282,8 +289,8 @@ def main():
     apps.escanear_en_segundo_plano()
     indexar_historial()
     memoria.indexar_existentes()
-    recordatorios.inicializar(hablar)
-    proactivo.inicializar(hablar, recordatorios.get_scheduler(), lambda: _ultimo_turno_ts)
+    recordatorios.inicializar(_decir)
+    proactivo.inicializar(_decir, recordatorios.get_scheduler(), lambda: _ultimo_turno_ts)
     dashboard.iniciar()
     camara.iniciar()
 
@@ -293,8 +300,12 @@ def main():
     if sesion_previa:
         historial.extend(sesion_previa)
         print(f"[ Historial previo: {len(sesion_previa) // 2} turnos cargados ]")
-    if time.localtime().tm_hour < 12:
+    hora = time.localtime().tm_hour
+    if hora < 12:
         _resumen_matutino()
+    else:
+        saludo = "Buenas tardes." if hora < 20 else "Buenas noches."
+        _decir(saludo)
 
     import winsound
     _turnos_conv = 0
@@ -316,7 +327,7 @@ def main():
             app_activa = get_app_activa()
             texto, _ = escuchar()
         except KeyboardInterrupt:
-            hablar("Hasta luego.")
+            _decir("Hasta luego.")
             break
 
         if not texto:
@@ -326,7 +337,7 @@ def main():
         _ultimo_turno_ts = time.time()
         print(f"Tu: {texto}")
         if "salir" in texto.lower():
-            hablar("Hasta luego.")
+            _decir("Hasta luego.")
             break
 
         # Modo dictar — escribe directamente en la app activa
@@ -334,7 +345,7 @@ def main():
             if re.search(r"\b(para|detener|terminar|salir|fin)\s*(de\s*)?(dictar|dictado)\b", texto, re.IGNORECASE):
                 _dictando = False
                 _turnos_conv = 2
-                hablar("Modo dictar desactivado.")
+                _decir("Modo dictar desactivado.")
             else:
                 txt_proc = _aplicar_subs_dictar(texto)
                 partes   = txt_proc.split("\n")
@@ -399,7 +410,7 @@ def main():
         except Exception as e:
             print(f"\n[ Error al consultar Claude: {e} ]")
             winsound.Beep(300, 400)
-            hablar("Tuve un problema. Intenta de nuevo.")
+            _decir("Tuve un problema. Intenta de nuevo.")
             historial.pop()
             continue
 
@@ -435,9 +446,10 @@ def main():
 
         if fue_interrumpido():
             historial.pop()
-            hablar("Okay.")
+            _decir("Okay.")
             continue
 
+        print(f"Imai: {respuesta}")
         historial.append({"role": "assistant", "content": respuesta})
         _turnos_conv = 2
         _guardar_historial_sesion(historial)

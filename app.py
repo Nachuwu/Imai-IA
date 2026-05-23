@@ -347,18 +347,25 @@ if __name__ == "__main__":
             try:
                 while True:
                     msg = _log_queue.get_nowait()
-                    if msg.startswith("Tu:"):
-                        self._agregar_burbuja(msg[3:].strip(), "user")
-                        self._turnos += 1
-                        self._var_turnos.set(f"{self._turnos} {'turno' if self._turnos == 1 else 'turnos'}")
-                        self._set_estado("Procesando...", _AMARILLO, pulsar=False)
-                    elif msg.startswith("Imai:"):
-                        self._agregar_burbuja(msg[5:].strip(), "imai")
-                        self._set_estado("Respondiendo...", _AZUL, pulsar=False)
-                    elif "Escuchando..." in msg:
-                        self._set_estado("Escuchando...", _VERDE, pulsar=True)
-                    elif "[ Tool:" in msg:
-                        self._set_estado("Ejecutando...", _AMARILLO, pulsar=False)
+                    try:
+                        if msg.startswith("Tu:"):
+                            txt = msg[3:].strip()
+                            if txt:
+                                self._agregar_burbuja(txt, "user")
+                            self._turnos += 1
+                            self._var_turnos.set(f"{self._turnos} {'turno' if self._turnos == 1 else 'turnos'}")
+                            self._set_estado("Procesando...", _AMARILLO, pulsar=False)
+                        elif msg.startswith("Imai:"):
+                            txt = msg[5:].strip()
+                            if txt:
+                                self._agregar_burbuja(txt, "imai")
+                            self._set_estado("Respondiendo...", _AZUL, pulsar=False)
+                        elif "Escuchando..." in msg:
+                            self._set_estado("Escuchando...", _VERDE, pulsar=True)
+                        elif "[ Tool:" in msg:
+                            self._set_estado("Ejecutando...", _AMARILLO, pulsar=False)
+                    except Exception:
+                        pass
             except queue.Empty:
                 pass
             self.after(100, self._poll_log)
@@ -549,5 +556,4 @@ if __name__ == "__main__":
             return img
 
     # ── Lanzar ────────────────────────────────────────────────────────────────
-    splash.destroy()
     ImaiApp().mainloop()
