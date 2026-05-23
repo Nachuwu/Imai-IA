@@ -9,6 +9,12 @@ chroma_db/
 models/
 wake_word_data/
 
+# Excepciones: mantener estructura de carpetas vacías
+!data/.gitkeep
+!audio/.gitkeep
+!historial/.gitkeep
+!models/.gitkeep
+
 # Python
 __pycache__/
 *.pyc
