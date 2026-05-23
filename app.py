@@ -131,6 +131,9 @@ if __name__ == "__main__":
             self._tray        = None
             self._imai_thread = None
             self._pulso       = False
+            self._pulsar      = False   # True solo cuando escucha activamente
+            self._dot_on      = _DIM   # color encendido del dot
+            self._dot_off     = _DIM   # color apagado del dot
 
             self._construir_ui()
             self._poll_log()
@@ -270,20 +273,43 @@ if __name__ == "__main__":
                     msg = _log_queue.get_nowait()
                     if msg.startswith("Tu:"):
                         self._escribir_log(msg, "user")
+                        self._set_estado("Procesando...", _AMARILLO, pulsar=False)
                     elif msg.startswith("Imai:"):
                         self._escribir_log(msg, "imai")
+                        self._set_estado("Respondiendo...", _AZUL, pulsar=False)
+                    elif "Escuchando..." in msg:
+                        self._set_estado("Escuchando...", _VERDE, pulsar=True)
+                    elif "[ Tool:" in msg:
+                        self._set_estado("Ejecutando...", _AMARILLO, pulsar=False)
             except queue.Empty:
                 pass
             self.after(100, self._poll_log)
 
         # ── Animación ─────────────────────────────────────────────────────────
 
-        def _animar_dot(self):
-            if self._corriendo:
-                self._pulso = not self._pulso
-                color = _VERDE if self._pulso else "#1a5c2a"
+        def _set_estado(self, texto: str, color: str, pulsar: bool = False):
+            self._var_estado.set(texto)
+            self._lbl_estado.configure(text_color=color)
+            self._pulsar  = pulsar
+            self._dot_on  = color
+            self._dot_off = self._oscurecer(color)
+            if not pulsar:
                 self._dot_cv.itemconfig(self._dot, fill=color)
-            self.after(600, self._animar_dot)
+
+        @staticmethod
+        def _oscurecer(hex_color: str) -> str:
+            r = int(hex_color[1:3], 16) // 3
+            g = int(hex_color[3:5], 16) // 3
+            b = int(hex_color[5:7], 16) // 3
+            return f"#{r:02x}{g:02x}{b:02x}"
+
+        def _animar_dot(self):
+            if self._pulsar:
+                self._pulso = not self._pulso
+                self._dot_cv.itemconfig(
+                    self._dot,
+                    fill=self._dot_on if self._pulso else self._dot_off)
+            self.after(500, self._animar_dot)
 
         # ── Control ───────────────────────────────────────────────────────────
 
@@ -297,9 +323,7 @@ if __name__ == "__main__":
             self._corriendo = True
             self._btn.configure(text="⏹   DETENER",
                                 fg_color=_ROJO, hover_color="#f85149")
-            self._var_estado.set("Escuchando...")
-            self._lbl_estado.configure(text_color=_VERDE)
-            self._dot_cv.itemconfig(self._dot, fill=_VERDE)
+            self._set_estado("Iniciando...", _GRIS, pulsar=False)
 
             sys.stdout = _StdoutCapture(_log_queue)
 
@@ -322,12 +346,11 @@ if __name__ == "__main__":
             except Exception:
                 pass
             self._corriendo = False
+            self._pulsar = False
             sys.stdout = sys.__stdout__
             self._btn.configure(text="▶   INICIAR IMAI",
                                 fg_color="#238636", hover_color="#2ea043")
-            self._var_estado.set("Detenido")
-            self._lbl_estado.configure(text_color=_DIM)
-            self._dot_cv.itemconfig(self._dot, fill=_DIM)
+            self._set_estado("Detenido", _DIM, pulsar=False)
             self._escribir_log("Imai detenido.", "dim")
             self._actualizar_tray()
 
