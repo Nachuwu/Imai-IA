@@ -13,6 +13,10 @@ from config import DATA_DIR as _DATA_DIR
 _ARCHIVO = os.path.join(_DATA_DIR, "recordatorios.json")
 
 
+def get_scheduler():
+    return _scheduler
+
+
 def inicializar(hablar_cb):
     global _scheduler, _hablar_fn
     _hablar_fn = hablar_cb
