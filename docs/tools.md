@@ -425,6 +425,21 @@ Pide confirmación en voz antes de enviar.
 
 ---
 
+## Alertas proactivas
+
+Estas no son herramientas que el usuario invoca — Imai las ejecuta solo en segundo plano.
+
+| Alerta | Frecuencia | Qué hace |
+|--------|-----------|----------|
+| **Resumen diario** | 22:00 (cron) | Habla el clima del día, eventos de Calendar, recordatorios pendientes y número de interacciones |
+| **Clima adverso** | Cada hora | Si el tiempo cambia a lluvia, nieve o tormenta, avisa en voz. Reset automático cuando mejora. |
+| **Correos importantes** | Cada 15 min | Revisa Gmail, Claude juzga si hay algo urgente y avisa. No repite el mismo correo. |
+| **Inactividad** | Cada 5 min | Si llevas más de 45 minutos sin hablar, sugiere levantarte o tomar agua. |
+
+El estado de cada alerta se persiste en `data/proactivo_estado.json` — sobrevive reinicios.
+
+---
+
 ## Comandos encadenados
 
 Imai puede ejecutar múltiples comandos en una sola frase, separados por "y", "luego", "después", "también" o "además":
