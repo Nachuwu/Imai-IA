@@ -2,6 +2,8 @@
 
 Imai es un asistente personal de voz en español que corre en tu máquina. Escucha tu micrófono, transcribe lo que dices con Whisper, ejecuta comandos directos o consulta Claude (Anthropic) como LLM, y te responde en voz alta.
 
+→ [Guía de instalación](docs/instalacion.md) · [Referencia de las 38 herramientas](docs/tools.md)
+
 Su nombre viene de **Imai**, la estrella delta de la Cruz del Sur, visible desde Chile.
 
 ---
@@ -105,7 +107,7 @@ Micrófono → Wake word → STT → Intención → Herramienta O Claude LLM →
 | Visión | Claude Vision con captura de pantalla vía Pillow |
 | Búsqueda web | DuckDuckGo Instant Answer API (sin API key) |
 | Control de ventanas | pygetwindow + rapidfuzz |
-| Mouse / teclado | pyautogui + Claude Vision para clic por texto |
+| Mouse / teclado | pyautogui + Claude Vision (Ctrl+F highlight) para clic por texto |
 | Recordatorios | APScheduler con persistencia JSON (puntuales y recurrentes) |
 | Google Calendar | Google Calendar API v3 con OAuth |
 | Gmail | Gmail API v1 con OAuth |
@@ -262,7 +264,12 @@ Imai-IA/
 │   ├── memoria.py              # Memoria persistente (JSON + ChromaDB vectorial)
 │   ├── historial.py            # Log de conversaciones en formato ChatML
 │   ├── rag.py                  # Búsqueda semántica sobre el historial (ChromaDB)
+│   ├── contexto.py             # Detección de app activa y contexto de clipboard
+│   ├── camara.py               # Captura de webcam en daemon thread
 │   └── utils.py                # Utilidades compartidas
+├── docs/
+│   ├── instalacion.md          # Guía de instalación paso a paso
+│   └── tools.md                # Referencia completa de las 38 herramientas
 ├── models/
 │   ├── es_ES-davefx-medium.onnx        # Modelo Piper TTS (no subir al repo)
 │   ├── es_ES-davefx-medium.onnx.json   # Config Piper TTS
