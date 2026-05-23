@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import threading
 
-from config import VOZ, FFMPEG_BIN
+from config import VOZ
 
 _historial = []
 _lock      = threading.Lock()
@@ -18,8 +18,6 @@ _lock      = threading.Lock()
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _ffmpeg_cmd():
-    if FFMPEG_BIN:
-        return os.path.join(FFMPEG_BIN, "ffmpeg")
     return "ffmpeg"
 
 def _webm_a_wav(audio_bytes: bytes) -> str:
