@@ -27,6 +27,9 @@ Su nombre viene de **Imai**, la estrella delta de la Cruz del Sur, visible desde
 | Scroll | "haz scroll abajo", "sube tres páginas" |
 | Clic por coordenadas | "haz clic en 500, 300" |
 | Clic por texto | "haz clic en Aceptar" (Claude Vision localiza el botón) |
+| **Modo dictar** | "empieza a dictar" → todo lo que digas se escribe en la app activa |
+
+En modo dictar, puedes decir símbolos: **"punto"** → `.` · **"coma"** → `,` · **"nueva línea"** → Enter · **"dos puntos"** → `:` · **"abre paréntesis"** → `(` · Para salir: **"para de dictar"**
 
 ### Música y medios
 | Comando | Ejemplo |
@@ -44,6 +47,7 @@ Su nombre viene de **Imai**, la estrella delta de la Cruz del Sur, visible desde
 | Calculadora | "¿cuánto es 20% de 350?" |
 | Búsqueda web | "busca qué es la fusión nuclear" |
 | Analizar pantalla | "¿qué hay en pantalla?", "describe lo que estoy viendo" |
+| Leer página web | "léeme esto", "resume esta página", "¿qué dice aquí sobre X?" |
 
 ### Organización
 | Comando | Ejemplo |
@@ -94,7 +98,7 @@ Micrófono → Wake word → STT → Intención → Herramienta O Claude LLM →
 |------------|------------|
 | Wake word | Whisper sliding window + rapidfuzz fuzzy matching |
 | STT | Groq `whisper-large-v3` (nube) + faster-whisper `small` (local fallback) |
-| Detección de idioma | Automática — responde en el mismo idioma que el usuario |
+| Idioma | Español forzado en STT — Imai siempre escucha y responde en español |
 | Detección de intención | Regex rápido, Claude LLM para casos ambiguos |
 | LLM | Claude API (Anthropic) — `claude-haiku-4-5-20251001` |
 | TTS | Piper TTS (local) → Edge TTS (nube) → pyttsx3 (fallback) |
@@ -106,7 +110,7 @@ Micrófono → Wake word → STT → Intención → Herramienta O Claude LLM →
 | Google Calendar | Google Calendar API v3 con OAuth |
 | Gmail | Gmail API v1 con OAuth |
 | Memoria | JSON estructurado (perfil + hechos) + ChromaDB vectorial |
-| Historial | JSONL por día en formato ChatML |
+| Historial | JSONL por día en formato ChatML + últimas 3 turns persistidas entre sesiones |
 | RAG | ChromaDB + sentence-transformers |
 | Dashboard | Flask en `http://localhost:5000` |
 
