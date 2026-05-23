@@ -129,13 +129,15 @@ if __name__ == "__main__":
             self.configure(fg_color=_BG)
             self.protocol("WM_DELETE_WINDOW", self._ir_a_tray)
 
-            self._corriendo   = False
-            self._tray        = None
-            self._imai_thread = None
-            self._pulso       = False
-            self._pulsar      = False   # True solo cuando escucha activamente
-            self._dot_on      = _DIM   # color encendido del dot
-            self._dot_off     = _DIM   # color apagado del dot
+            self._corriendo      = False
+            self._tray           = None
+            self._imai_thread    = None
+            self._pulso          = False
+            self._pulsar         = False
+            self._dot_on         = _DIM
+            self._dot_off        = _DIM
+            self._turnos         = 0
+            self._ultimo_msg_ts  = None   # para el separador de sesión
 
             self._construir_ui()
             self._set_window_icon()
@@ -161,14 +163,19 @@ if __name__ == "__main__":
                                 border_width=1, border_color=_BORDE)
             card.pack(fill="x", padx=24, pady=(0, 14))
 
-            fila = ctk.CTkFrame(card, fg_color="transparent")
-            fila.pack(pady=14, padx=18)
+            fila = tk.Frame(card, bg=_PANEL)
+            fila.pack(fill="x", pady=14, padx=18)
 
             self._dot_cv = tk.Canvas(fila, width=10, height=10,
                                      bg=_PANEL, highlightthickness=0)
             self._dot = self._dot_cv.create_oval(1, 1, 9, 9,
                                                   fill=_DIM, outline="")
             self._dot_cv.pack(side="left", padx=(0, 9))
+
+            self._var_turnos = tk.StringVar(value="")
+            tk.Label(fila, textvariable=self._var_turnos,
+                     bg=_PANEL, fg=_DIM,
+                     font=("Segoe UI", 8)).pack(side="right")
 
             self._var_estado = tk.StringVar(value="Detenido")
             self._lbl_estado = ctk.CTkLabel(fila,
@@ -241,9 +248,29 @@ if __name__ == "__main__":
 
         # ── Chat burbujas ─────────────────────────────────────────────────────
 
+        def _agregar_separador(self, dt: datetime):
+            hora = dt.strftime("%H:%M")
+            fila = tk.Frame(self._chat, bg=_PANEL)
+            fila.pack(fill="x", padx=10, pady=10)
+            tk.Frame(fila, bg=_BORDE, height=1).pack(
+                side="left", fill="x", expand=True, pady=5)
+            tk.Label(fila, text=f"  {hora}  ", bg=_PANEL, fg=_DIM,
+                     font=("Segoe UI", 7)).pack(side="left")
+            tk.Frame(fila, bg=_BORDE, height=1).pack(
+                side="left", fill="x", expand=True, pady=5)
+
         def _agregar_burbuja(self, texto: str, rol: str):
+            ahora = datetime.now()
+
+            # Separador si pasaron más de 5 minutos desde el último mensaje
+            if self._ultimo_msg_ts is not None:
+                delta = (ahora - self._ultimo_msg_ts).total_seconds() / 60
+                if delta >= 5:
+                    self._agregar_separador(ahora)
+            self._ultimo_msg_ts = ahora
+
             es_user = (rol == "user")
-            ts      = datetime.now().strftime("%H:%M")
+            ts      = ahora.strftime("%H:%M")
             color_burbuja = "#1f2d3d" if es_user else "#1a2b1a"
             color_sender  = _AZUL if es_user else _VERDE
             nombre        = "Tú" if es_user else "Imai"
@@ -306,6 +333,8 @@ if __name__ == "__main__":
                     msg = _log_queue.get_nowait()
                     if msg.startswith("Tu:"):
                         self._agregar_burbuja(msg[3:].strip(), "user")
+                        self._turnos += 1
+                        self._var_turnos.set(f"{self._turnos} {'turno' if self._turnos == 1 else 'turnos'}")
                         self._set_estado("Procesando...", _AMARILLO, pulsar=False)
                     elif msg.startswith("Imai:"):
                         self._agregar_burbuja(msg[5:].strip(), "imai")
@@ -388,7 +417,10 @@ if __name__ == "__main__":
             except Exception:
                 pass
             self._corriendo = False
-            self._pulsar = False
+            self._pulsar        = False
+            self._turnos        = 0
+            self._ultimo_msg_ts = None
+            self._var_turnos.set("")
             sys.stdout = sys.__stdout__
             self._btn.configure(text="▶   INICIAR IMAI",
                                 fg_color="#238636", hover_color="#2ea043")
