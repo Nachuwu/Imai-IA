@@ -187,7 +187,7 @@ if __name__ == "__main__":
             # Cabecera del log
             hdr = tk.Frame(self, bg=_BG)
             hdr.pack(fill="x", padx=26, pady=(0, 5))
-            tk.Label(hdr, text="ACTIVIDAD", bg=_BG, fg=_DIM,
+            tk.Label(hdr, text="CHAT", bg=_BG, fg=_DIM,
                      font=("Segoe UI", 7, "bold")).pack(side="left")
             tk.Button(hdr, text="limpiar", bg=_BG, fg=_DIM,
                       relief="flat", bd=0, font=("Segoe UI", 7),
@@ -245,14 +245,6 @@ if __name__ == "__main__":
                         self._escribir_log(msg, "user")
                     elif msg.startswith("Imai:"):
                         self._escribir_log(msg, "imai")
-                    elif msg.startswith("[ Tool:"):
-                        self._escribir_log(msg, "tool")
-                    elif msg.startswith("[") or msg.startswith(" *"):
-                        self._escribir_log(msg, "system")
-                    elif "rror" in msg:
-                        self._escribir_log(msg, "error")
-                    else:
-                        self._escribir_log(msg, "dim")
             except queue.Empty:
                 pass
             self.after(100, self._poll_log)
