@@ -394,10 +394,12 @@ def main():
             continue
 
         if tool_calls:
-            resultados = []
+            resultados     = []
+            nombres_tools  = []
             for tc in tool_calls:
                 nombre = tc["function"]["name"]
                 args   = tc["function"]["arguments"]
+                nombres_tools.append(nombre)
                 print(f"[ Tool: {nombre} ]")
                 resultado = ejecutar_tool(nombre, args, hablar_cb=hablar)
                 if resultado:
@@ -416,7 +418,8 @@ def main():
                 )
             historial.append({"role": "assistant", "content": " ".join(resultados)})
             _guardar_historial_sesion(historial)
-            if nombre not in ("actualizar_memoria", "guardar_memoria"):
+            _SOLO_MEMORIA = {"actualizar_memoria", "guardar_memoria", "guardar_perfil"}
+            if any(n not in _SOLO_MEMORIA for n in nombres_tools):
                 _turnos_conv = 2
             continue
 

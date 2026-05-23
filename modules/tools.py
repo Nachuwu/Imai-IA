@@ -323,10 +323,13 @@ def captura_pantalla():
         return "No pude tomar la captura de pantalla."
 
 def analizar_pantalla(pregunta="¿Qué hay en esta pantalla?"):
+    import tempfile
     try:
-        ruta = _captura_ruta()
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            ruta = f.name
+        ImageGrab.grab().save(ruta)
     except Exception as e:
-        print(f"[ captura_ruta error: {e} ]")
+        print(f"[ analizar_pantalla captura error: {e} ]")
         return "No pude tomar la captura de pantalla."
     try:
         from modules.claude_llm import analizar_imagen
@@ -334,6 +337,11 @@ def analizar_pantalla(pregunta="¿Qué hay en esta pantalla?"):
     except Exception as e:
         print(f"[ analizar_pantalla error: {e} ]")
         return "No pude analizar la pantalla."
+    finally:
+        try:
+            os.unlink(ruta)
+        except Exception:
+            pass
 
 # ---------------------------------------------------------------------------
 # Notificaciones de escritorio
@@ -544,8 +552,11 @@ _pag.PAUSE    = 0.05
 
 def escribir_teclado(texto):
     """Escribe texto usando el portapapeles (soporta unicode)."""
+    anterior = pyperclip.paste()
     pyperclip.copy(texto)
     _pag.hotkey("ctrl", "v")
+    time.sleep(0.15)
+    pyperclip.copy(anterior)
     return f"Escribí: {texto[:60]}{'...' if len(texto) > 60 else ''}."
 
 def presionar_tecla(combo):
