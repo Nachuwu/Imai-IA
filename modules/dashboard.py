@@ -177,7 +177,7 @@ def iniciar(puerto=5000):
     log = __import__("logging")
     log.getLogger("werkzeug").setLevel(log.ERROR)
     threading.Thread(
-        target=lambda: app.run(host="127.0.0.1", port=puerto, debug=False, use_reloader=False),
+        target=lambda: app.run(host="0.0.0.0", port=puerto, debug=False, use_reloader=False),
         daemon=True,
         name="dashboard",
     ).start()
