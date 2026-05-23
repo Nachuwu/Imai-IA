@@ -1,0 +1,10 @@
+Descarga el modelo Piper TTS aquí y colócalo en esta carpeta:
+
+Modelo recomendado (español, voz masculina):
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json
+
+Luego en .env pon:
+  PIPER_MODEL=models/es_ES-davefx-medium.onnx
+
+Si no configuras Piper, Imai usará Edge TTS (requiere internet).

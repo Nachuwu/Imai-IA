@@ -2,11 +2,12 @@
 .env
 
 # Datos privados y generados en tiempo de ejecución
-data/
-audio/
-historial/
+# (usamos data/* en vez de data/ para que !.gitkeep funcione)
+data/*
+audio/*
+historial/*
 chroma_db/
-models/
+models/*
 wake_word_data/
 
 # Excepciones: mantener estructura de carpetas vacías
