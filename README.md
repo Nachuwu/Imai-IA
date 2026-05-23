@@ -88,6 +88,16 @@ En modo dictar, puedes decir símbolos: **"punto"** → `.` · **"coma"** → `,
 | Búsqueda semántica | "¿qué recuerdas sobre mis reuniones?" |
 | Historial con RAG | "¿recuerdas lo que hablamos ayer?" |
 
+### Alertas proactivas
+Imai avisa sin que preguntes:
+
+| Alerta | Cuándo |
+|--------|--------|
+| Resumen del día | Automático a las 22:00 — clima, eventos Calendar, recordatorios pendientes |
+| Clima adverso | Cuando cambia a lluvia o tormenta (revisa cada hora) |
+| Correos importantes | Si llega un correo urgente, Claude lo detecta (revisa cada 15 min) |
+| Sin moverte | Avisa si llevas más de 45 minutos sin interactuar |
+
 ### Comandos encadenados
 ```
 "sube el volumen y abre chrome"
@@ -112,7 +122,8 @@ Micrófono → Wake word → STT → Intención → Herramienta O Claude LLM →
 | LLM | Claude API (Anthropic) — `claude-haiku-4-5-20251001` |
 | TTS | Piper TTS (local) → Edge TTS (nube) → pyttsx3 (fallback) |
 | Visión | Claude Vision con captura de pantalla vía Pillow |
-| Búsqueda web | DuckDuckGo Instant Answer API (sin API key) |
+| Búsqueda web | DuckDuckGo Instant Answer → Wikipedia ES (fallback, sin API key) |
+| Proactivo | APScheduler — resumen diario, clima, correos importantes, inactividad |
 | Control de ventanas | pygetwindow + rapidfuzz |
 | Mouse / teclado | pyautogui + Claude Vision (Ctrl+F highlight) para clic por texto |
 | Recordatorios | APScheduler con persistencia JSON (puntuales y recurrentes) |
