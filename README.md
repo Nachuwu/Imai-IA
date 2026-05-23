@@ -1,5 +1,12 @@
 # Imai — Asistente de voz personal
 
+![Python](https://img.shields.io/badge/python-3.10+-blue)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
+![LLM](https://img.shields.io/badge/LLM-Claude%20Haiku-orange)
+![STT](https://img.shields.io/badge/STT-Whisper-yellow)
+![TTS](https://img.shields.io/badge/TTS-Piper%20%7C%20Edge-purple)
+
 Imai es un asistente personal de voz en español que corre en tu máquina. Escucha tu micrófono, transcribe lo que dices con Whisper, ejecuta comandos directos o consulta Claude (Anthropic) como LLM, y te responde en voz alta.
 
 → [Guía de instalación](docs/instalacion.md) · [Referencia de las 38 herramientas](docs/tools.md)
