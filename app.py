@@ -88,11 +88,12 @@ if __name__ == "__main__":
 
     def _cargar():
         import customtkinter
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageTk
         import pystray
         _loaded["ctk"]       = customtkinter
         _loaded["Image"]     = Image
         _loaded["ImageDraw"] = ImageDraw
+        _loaded["ImageTk"]   = ImageTk
         _loaded["pystray"]   = pystray
         _imports_done.set()
 
@@ -112,6 +113,7 @@ if __name__ == "__main__":
     ctk       = _loaded["ctk"]
     Image     = _loaded["Image"]
     ImageDraw = _loaded["ImageDraw"]
+    ImageTk   = _loaded["ImageTk"]
     pystray   = _loaded["pystray"]
 
     ctk.set_appearance_mode("dark")
@@ -136,6 +138,7 @@ if __name__ == "__main__":
             self._dot_off     = _DIM   # color apagado del dot
 
             self._construir_ui()
+            self._set_window_icon()
             self._poll_log()
             self._animar_dot()
 
@@ -214,7 +217,7 @@ if __name__ == "__main__":
             ctk.CTkFrame(self, height=1, fg_color=_BORDE,
                          corner_radius=0).pack(fill="x", padx=24, pady=(0, 10))
 
-            # Cabecera del log
+            # Cabecera del chat
             hdr = tk.Frame(self, bg=_BG)
             hdr.pack(fill="x", padx=26, pady=(0, 5))
             tk.Label(hdr, text="CHAT", bg=_BG, fg=_DIM,
@@ -223,59 +226,89 @@ if __name__ == "__main__":
                       relief="flat", bd=0, font=("Segoe UI", 7),
                       cursor="hand2", activebackground=_BG,
                       activeforeground=_GRIS,
-                      command=self._limpiar_log).pack(side="right")
+                      command=self._limpiar_chat).pack(side="right")
 
-            # Área de log
-            log_frame = ctk.CTkFrame(self, fg_color=_PANEL,
-                                     corner_radius=10,
-                                     border_width=1, border_color=_BORDE)
-            log_frame.pack(fill="both", expand=True, padx=24, pady=(0, 24))
+            # Área de burbujas
+            chat_frame = ctk.CTkFrame(self, fg_color=_PANEL,
+                                      corner_radius=10,
+                                      border_width=1, border_color=_BORDE)
+            chat_frame.pack(fill="both", expand=True, padx=24, pady=(0, 24))
 
-            scroll = tk.Scrollbar(log_frame, bg=_PANEL,
-                                  troughcolor=_PANEL, relief="flat", bd=0)
-            scroll.pack(side="right", fill="y")
+            self._chat = ctk.CTkScrollableFrame(chat_frame, fg_color=_PANEL,
+                                                scrollbar_button_color=_BORDE,
+                                                scrollbar_button_hover_color=_GRIS)
+            self._chat.pack(fill="both", expand=True, padx=2, pady=2)
 
-            self._log = tk.Text(log_frame, bg=_PANEL, fg="#c9d1d9",
-                                font=("Consolas", 9), relief="flat", bd=10,
-                                state="disabled", wrap="word", cursor="arrow",
-                                selectbackground=_BORDE,
-                                inactiveselectbackground=_BORDE,
-                                yscrollcommand=scroll.set)
-            self._log.pack(fill="both", expand=True)
-            scroll.config(command=self._log.yview)
+        # ── Chat burbujas ─────────────────────────────────────────────────────
 
-            self._log.tag_config("ts",     foreground=_DIM)
-            self._log.tag_config("user",   foreground=_AZUL)
-            self._log.tag_config("imai",   foreground=_VERDE)
-            self._log.tag_config("tool",   foreground=_AMARILLO)
-            self._log.tag_config("system", foreground=_GRIS)
-            self._log.tag_config("error",  foreground=_ROJO)
-            self._log.tag_config("dim",    foreground=_DIM)
+        def _agregar_burbuja(self, texto: str, rol: str):
+            es_user = (rol == "user")
+            ts      = datetime.now().strftime("%H:%M")
+            color_burbuja = "#1f2d3d" if es_user else "#1a2b1a"
+            color_sender  = _AZUL if es_user else _VERDE
+            nombre        = "Tú" if es_user else "Imai"
+            anchor        = "e" if es_user else "w"
 
-        # ── Log ───────────────────────────────────────────────────────────────
+            # Contenedor del mensaje
+            cont = tk.Frame(self._chat, bg=_PANEL)
+            cont.pack(fill="x", pady=(4, 0), padx=6)
 
-        def _escribir_log(self, texto: str, tag: str = "dim"):
-            ts = datetime.now().strftime("%H:%M")
-            self._log.config(state="normal")
-            self._log.insert("end", f"{ts}  ", "ts")
-            self._log.insert("end", texto + "\n", tag)
-            self._log.see("end")
-            self._log.config(state="disabled")
+            # Nombre del remitente
+            tk.Label(cont, text=nombre, bg=_PANEL, fg=color_sender,
+                     font=("Segoe UI", 7, "bold")).pack(anchor=anchor, padx=4)
 
-        def _limpiar_log(self):
-            self._log.config(state="normal")
-            self._log.delete("1.0", "end")
-            self._log.config(state="disabled")
+            # Burbuja
+            burbuja = ctk.CTkFrame(cont, fg_color=color_burbuja, corner_radius=12)
+            burbuja.pack(anchor=anchor, padx=2)
+
+            ctk.CTkLabel(burbuja,
+                         text=texto,
+                         font=ctk.CTkFont("Segoe UI", 10),
+                         text_color="#e6edf3",
+                         wraplength=215,
+                         justify="right" if es_user else "left",
+                         anchor="e" if es_user else "w").pack(
+                             padx=12, pady=(8, 2), anchor=anchor)
+
+            tk.Label(burbuja, text=ts, bg=color_burbuja, fg=_DIM,
+                     font=("Segoe UI", 7)).pack(
+                         anchor="e", padx=10, pady=(0, 6))
+
+            # Scroll al fondo
+            self.after(60, self._scroll_fondo)
+
+            # Toast si está en el tray
+            if not es_user and self._tray:
+                try:
+                    self._tray.notify(texto[:100], "★ Imai")
+                except Exception:
+                    pass
+
+        def _agregar_sistema(self, texto: str):
+            tk.Label(self._chat, text=f"— {texto} —",
+                     bg=_PANEL, fg=_DIM,
+                     font=("Segoe UI", 7)).pack(pady=6)
+            self.after(60, self._scroll_fondo)
+
+        def _limpiar_chat(self):
+            for w in self._chat.winfo_children():
+                w.destroy()
+
+        def _scroll_fondo(self):
+            try:
+                self._chat._parent_canvas.yview_moveto(1.0)
+            except Exception:
+                pass
 
         def _poll_log(self):
             try:
                 while True:
                     msg = _log_queue.get_nowait()
                     if msg.startswith("Tu:"):
-                        self._escribir_log(msg, "user")
+                        self._agregar_burbuja(msg[3:].strip(), "user")
                         self._set_estado("Procesando...", _AMARILLO, pulsar=False)
                     elif msg.startswith("Imai:"):
-                        self._escribir_log(msg, "imai")
+                        self._agregar_burbuja(msg[5:].strip(), "imai")
                         self._set_estado("Respondiendo...", _AZUL, pulsar=False)
                     elif "Escuchando..." in msg:
                         self._set_estado("Escuchando...", _VERDE, pulsar=True)
@@ -285,7 +318,16 @@ if __name__ == "__main__":
                 pass
             self.after(100, self._poll_log)
 
-        # ── Animación ─────────────────────────────────────────────────────────
+        # ── Animación e ícono ─────────────────────────────────────────────────
+
+        def _set_window_icon(self):
+            try:
+                img  = self._icono().resize((32, 32), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                self.wm_iconphoto(True, photo)
+                self._win_icon = photo   # evitar GC
+            except Exception:
+                pass
 
         def _set_estado(self, texto: str, color: str, pulsar: bool = False):
             self._var_estado.set(texto)
@@ -336,7 +378,7 @@ if __name__ == "__main__":
             self._imai_thread = threading.Thread(
                 target=self._run_imai, daemon=True, name="imai-main")
             self._imai_thread.start()
-            self._escribir_log("Imai iniciado.", "imai")
+            self._agregar_sistema("Imai iniciado")
             self._actualizar_tray()
 
         def _detener(self):
@@ -351,7 +393,7 @@ if __name__ == "__main__":
             self._btn.configure(text="▶   INICIAR IMAI",
                                 fg_color="#238636", hover_color="#2ea043")
             self._set_estado("Detenido", _DIM, pulsar=False)
-            self._escribir_log("Imai detenido.", "dim")
+            self._agregar_sistema("Imai detenido")
             self._actualizar_tray()
 
         def _run_imai(self):
