@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import time
+import threading
 import subprocess
 from modules.stt import escuchar, inicializar as inicializar_stt, esta_pausado, esperar_wake_word
 from modules.tts import hablar, fue_interrumpido
@@ -22,6 +23,8 @@ import modules.camara as camara
 import modules.proactivo as proactivo
 from modules.contexto import get_app_activa
 from config import CIUDAD, WAKE_WORD
+
+_STOP = threading.Event()
 
 MAX_TURNOS = 10
 _ultima_respuesta   = ""
@@ -238,6 +241,7 @@ def manejar_herramienta(texto):
 def _hablar_y_recordar(texto):
     global _ultima_respuesta
     _ultima_respuesta = texto
+    print(f"Imai: {texto}")
     hablar(texto)
 
 def _hablar_streaming(oracion):
@@ -295,7 +299,7 @@ def main():
     import winsound
     _turnos_conv = 0
 
-    while True:
+    while not _STOP.is_set():
         try:
             if esta_pausado():
                 time.sleep(0.5)
