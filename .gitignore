@@ -9,6 +9,7 @@ historial/*
 chroma_db/
 models/*
 wake_word_data/
+wake_word_data.zip
 
 # Excepciones: mantener estructura de carpetas vacías
 !data/.gitkeep

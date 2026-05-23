@@ -27,10 +27,6 @@ def pausar(segundos):
 def esta_pausado():
     return time.time() < _no_molestar_hasta
 
-def reanudar():
-    global _no_molestar_hasta
-    _no_molestar_hasta = 0.0
-
 # Cliente Groq (None si no hay API key o paquete no instalado)
 _groq_client = None
 if GROQ_API_KEY:
