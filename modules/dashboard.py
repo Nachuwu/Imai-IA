@@ -2,13 +2,14 @@
 Dashboard web local — http://localhost:5000
 Muestra memoria, historial y recordatorios en tiempo real.
 """
+import io
 import json
 import os
 import glob
 import threading
 import time
 import cv2
-from flask import Flask, jsonify, render_template_string, Response
+from flask import Flask, jsonify, render_template_string, Response, request, send_file
 from config import DATA_DIR
 
 _ROOT     = os.path.join(os.path.dirname(__file__), "..")
@@ -171,6 +172,139 @@ def api_historial():
         except Exception:
             pass
     return jsonify(entradas[-60:])
+
+
+_HTML_MOVIL = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Imai</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', sans-serif;
+       display: flex; flex-direction: column; align-items: center;
+       min-height: 100vh; padding: 24px 16px; }
+h1  { color: #58a6ff; font-size: 1.3rem; letter-spacing: 1px; margin-bottom: 8px; }
+#estado { color: #8b949e; font-size: 0.85rem; min-height: 20px; margin-bottom: 28px; }
+#btn    { width: 120px; height: 120px; border-radius: 50%; border: none; cursor: pointer;
+          background: #21262d; font-size: 2.5rem; transition: all 0.15s;
+          box-shadow: 0 0 0 4px #30363d; outline: none; }
+#btn.grabando { background: #da3633; box-shadow: 0 0 0 8px rgba(218,54,51,0.3); }
+#btn.pensando { background: #388bfd; box-shadow: 0 0 0 8px rgba(56,139,253,0.3); animation: pulso 1s infinite; }
+@keyframes pulso { 0%,100% { opacity:1 } 50% { opacity:.6 } }
+#chat { width: 100%; max-width: 480px; margin-top: 32px; display: flex; flex-direction: column; gap: 10px; }
+.burbuja { padding: 10px 14px; border-radius: 14px; font-size: 0.9rem; line-height: 1.5; max-width: 85%; }
+.burbuja.tu   { background: #1f2d3d; border-left: 3px solid #58a6ff; align-self: flex-end; }
+.burbuja.imai { background: #1a2b1a; border-left: 3px solid #3fb950; align-self: flex-start; }
+.label { font-size: 0.7rem; color: #484f58; margin-bottom: 2px; }
+</style>
+</head>
+<body>
+<h1>★ Imai</h1>
+<div id="estado">Toca para hablar</div>
+<button id="btn">🎤</button>
+<div id="chat"></div>
+
+<script>
+let grabando = false;
+let recorder, chunks = [];
+const btn    = document.getElementById('btn');
+const estado = document.getElementById('estado');
+const chat   = document.getElementById('chat');
+
+function agregar(rol, texto) {
+  const wrap = document.createElement('div');
+  const lbl  = document.createElement('div');
+  lbl.className = 'label';
+  lbl.textContent = rol === 'tu' ? 'Tú' : 'Imai';
+  const b = document.createElement('div');
+  b.className = 'burbuja ' + rol;
+  b.textContent = texto;
+  wrap.appendChild(lbl);
+  wrap.appendChild(b);
+  chat.appendChild(wrap);
+  wrap.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function iniciarGrabacion() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  chunks = [];
+  recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = e => chunks.push(e.data);
+  recorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    await enviar(blob);
+  };
+  recorder.start();
+  btn.className = 'grabando';
+  btn.textContent = '⏹';
+  estado.textContent = 'Grabando...';
+  grabando = true;
+}
+
+function detenerGrabacion() {
+  recorder.stop();
+  btn.className = 'pensando';
+  btn.textContent = '⏳';
+  estado.textContent = 'Procesando...';
+  grabando = false;
+}
+
+async function enviar(blob) {
+  try {
+    const res = await fetch('/api/comando', {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'audio/webm' },
+      body: blob,
+    });
+    const transcrito = res.headers.get('X-Texto') || '';
+    if (transcrito) agregar('tu', transcrito);
+    const audio = new Audio(URL.createObjectURL(await res.blob()));
+    estado.textContent = 'Respondiendo...';
+    audio.play();
+    audio.onended = () => { estado.textContent = 'Toca para hablar'; };
+    if (transcrito) {
+      const respTxt = res.headers.get('X-Respuesta') || '';
+      if (respTxt) agregar('imai', respTxt);
+    }
+  } catch(e) {
+    estado.textContent = 'Error al enviar';
+  } finally {
+    btn.className = '';
+    btn.textContent = '🎤';
+  }
+}
+
+btn.addEventListener('click', () => {
+  if (!grabando) iniciarGrabacion();
+  else           detenerGrabacion();
+});
+</script>
+</body>
+</html>"""
+
+
+@app.route("/movil")
+def movil():
+    return render_template_string(_HTML_MOVIL)
+
+
+@app.route("/api/comando", methods=["POST"])
+def api_comando():
+    import modules.api_movil as _api
+    audio_bytes = request.data
+    if not audio_bytes:
+        return jsonify({"error": "sin audio"}), 400
+    try:
+        texto, audio_mp3 = _api.procesar(audio_bytes)
+        resp = send_file(io.BytesIO(audio_mp3), mimetype="audio/mpeg")
+        resp.headers["X-Texto"] = texto[:200] if texto else ""
+        return resp
+    except Exception as e:
+        print(f"[ /api/comando error: {e} ]")
+        return jsonify({"error": str(e)}), 500
 
 
 def iniciar(puerto=5000):
