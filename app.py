@@ -1,8 +1,7 @@
 """
 app.py — Lanzador gráfico de Imai
-Ventana con botón Iniciar/Detener + log de actividad.
-Cerrar X → minimiza a la bandeja del sistema (Imai sigue corriendo).
-Doble clic en el icono del tray → restaura la ventana.
+Ventana moderna con CustomTkinter + bandeja del sistema (pystray).
+Cerrar X → minimiza al tray. Doble clic en el icono → restaura.
 """
 import math
 import os
@@ -11,25 +10,42 @@ import sys
 import threading
 import webbrowser
 import tkinter as tk
+from datetime import datetime
 
+import customtkinter as ctk
 from PIL import Image, ImageDraw
 import pystray
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+# Paleta — coincide con el dashboard web
+_BG       = "#0d1117"
+_PANEL    = "#161b22"
+_PANEL2   = "#1c2128"
+_BORDE    = "#30363d"
+_AZUL     = "#58a6ff"
+_VERDE    = "#3fb950"
+_ROJO     = "#da3633"
+_AMARILLO = "#d29922"
+_GRIS     = "#8b949e"
+_DIM      = "#484f58"
+
+_TAILSCALE_IP = "100.90.28.44"
 
 _log_queue: queue.Queue = queue.Queue()
 
 
 class _StdoutCapture:
-    """Redirige stdout al queue del log y mantiene la salida original."""
     def __init__(self, q: queue.Queue):
-        self._q = q
-        self._orig = sys.__stdout__
+        self._q, self._orig = q, sys.__stdout__
 
-    def write(self, texto: str):
-        if texto and texto.strip():
-            self._q.put(texto.strip())
+    def write(self, t: str):
+        if t and t.strip():
+            self._q.put(t.strip())
         if self._orig:
-            self._orig.write(texto)
-        return len(texto)
+            self._orig.write(t)
+        return len(t)
 
     def flush(self):
         if self._orig:
@@ -39,110 +55,157 @@ class _StdoutCapture:
         return False
 
 
-class ImaiApp:
-    _BG      = "#0d1117"
-    _PANEL   = "#161b22"
-    _BORDE   = "#30363d"
-    _AZUL    = "#58a6ff"
-    _VERDE   = "#3fb950"
-    _ROJO    = "#da3633"
-    _AMARILLO= "#d29922"
-    _GRIS    = "#8b949e"
-    _DIM     = "#484f58"
-
+class ImaiApp(ctk.CTk):
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Imai")
-        self.root.geometry("400x520")
-        self.root.resizable(False, False)
-        self.root.configure(bg=self._BG)
-        self.root.protocol("WM_DELETE_WINDOW", self._ir_a_tray)
+        super().__init__()
+        self.title("Imai")
+        self.geometry("380x620")
+        self.resizable(False, False)
+        self.configure(fg_color=_BG)
+        self.protocol("WM_DELETE_WINDOW", self._ir_a_tray)
 
         self._corriendo   = False
-        self._imai_thread = None
         self._tray        = None
+        self._imai_thread = None
+        self._pulso       = False
 
         self._construir_ui()
         self._poll_log()
+        self._animar_dot()
 
     # ── UI ───────────────────────────────────────────────────────────────────
 
     def _construir_ui(self):
         # Título
-        tk.Label(self.root, text="★  Imai — delta Crucis",
-                 bg=self._BG, fg=self._AZUL,
-                 font=("Segoe UI", 15, "bold")).pack(pady=(24, 6))
+        ctk.CTkLabel(self,
+                     text="★  Imai",
+                     font=ctk.CTkFont("Segoe UI", 24, "bold"),
+                     text_color=_AZUL).pack(pady=(28, 2))
 
-        # Estado
-        self._var_estado = tk.StringVar(value="● Detenido")
-        self._lbl_estado = tk.Label(self.root,
-                                    textvariable=self._var_estado,
-                                    bg=self._BG, fg=self._DIM,
-                                    font=("Segoe UI", 10))
-        self._lbl_estado.pack(pady=(0, 20))
+        ctk.CTkLabel(self,
+                     text="delta Crucis",
+                     font=ctk.CTkFont("Segoe UI", 11),
+                     text_color=_DIM).pack(pady=(0, 22))
 
-        # Botón principal
-        self._btn = tk.Button(self.root,
-                              text="▶   INICIAR IMAI",
-                              command=self._toggle,
-                              bg="#238636", fg="white",
-                              font=("Segoe UI", 12, "bold"),
-                              relief="flat", bd=0,
-                              padx=32, pady=14,
-                              cursor="hand2",
-                              activebackground="#2ea043",
-                              activeforeground="white")
-        self._btn.pack(pady=(0, 12))
+        # ── Card de estado ────────────────────────────────────────────────────
+        card = ctk.CTkFrame(self, fg_color=_PANEL,
+                            corner_radius=12,
+                            border_width=1, border_color=_BORDE)
+        card.pack(fill="x", padx=24, pady=(0, 14))
 
-        # Dashboard
-        tk.Button(self.root,
-                  text="🌐  Abrir Dashboard",
-                  command=lambda: webbrowser.open("https://localhost:5000"),
-                  bg=self._PANEL, fg=self._AZUL,
-                  font=("Segoe UI", 9),
-                  relief="flat", bd=0,
-                  padx=14, pady=7,
-                  cursor="hand2",
-                  activebackground="#21262d",
-                  activeforeground=self._AZUL).pack(pady=(0, 18))
+        fila_estado = ctk.CTkFrame(card, fg_color="transparent")
+        fila_estado.pack(pady=14, padx=18)
 
-        # Separador
-        tk.Frame(self.root, bg=self._BORDE, height=1).pack(fill="x", padx=20, pady=(0, 8))
-        tk.Label(self.root, text="ACTIVIDAD",
-                 bg=self._BG, fg=self._DIM,
-                 font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=22)
+        # Dot animado
+        self._dot_cv = tk.Canvas(fila_estado, width=10, height=10,
+                                  bg=_PANEL, highlightthickness=0)
+        self._dot = self._dot_cv.create_oval(1, 1, 9, 9, fill=_DIM, outline="")
+        self._dot_cv.pack(side="left", padx=(0, 9))
 
-        # Log
-        marco = tk.Frame(self.root, bg=self._PANEL,
-                         highlightthickness=1,
-                         highlightbackground=self._BORDE)
-        marco.pack(fill="both", expand=True, padx=20, pady=(4, 20))
+        self._var_estado = tk.StringVar(value="Detenido")
+        self._lbl_estado = ctk.CTkLabel(fila_estado,
+                                         textvariable=self._var_estado,
+                                         font=ctk.CTkFont("Segoe UI", 10),
+                                         text_color=_DIM)
+        self._lbl_estado.pack(side="left")
 
-        scroll = tk.Scrollbar(marco, bg=self._PANEL)
+        # ── Botón principal ───────────────────────────────────────────────────
+        self._btn = ctk.CTkButton(self,
+                                   text="▶   INICIAR IMAI",
+                                   command=self._toggle,
+                                   font=ctk.CTkFont("Segoe UI", 13, "bold"),
+                                   fg_color="#238636",
+                                   hover_color="#2ea043",
+                                   height=50,
+                                   corner_radius=10)
+        self._btn.pack(fill="x", padx=24, pady=(0, 10))
+
+        # ── Botones secundarios ───────────────────────────────────────────────
+        fila_sec = tk.Frame(self, bg=_BG)
+        fila_sec.pack(fill="x", padx=24, pady=(0, 22))
+
+        ctk.CTkButton(fila_sec,
+                      text="🌐  Dashboard",
+                      command=lambda: webbrowser.open("https://localhost:5000"),
+                      font=ctk.CTkFont("Segoe UI", 10),
+                      fg_color=_PANEL, hover_color=_PANEL2,
+                      text_color=_AZUL,
+                      border_width=1, border_color=_BORDE,
+                      height=34, corner_radius=8).pack(
+                          side="left", expand=True, fill="x", padx=(0, 5))
+
+        ctk.CTkButton(fila_sec,
+                      text="📱  Móvil",
+                      command=lambda: webbrowser.open(
+                          f"https://{_TAILSCALE_IP}:5000/movil"),
+                      font=ctk.CTkFont("Segoe UI", 10),
+                      fg_color=_PANEL, hover_color=_PANEL2,
+                      text_color=_GRIS,
+                      border_width=1, border_color=_BORDE,
+                      height=34, corner_radius=8).pack(
+                          side="left", expand=True, fill="x", padx=(5, 0))
+
+        # ── Separador ─────────────────────────────────────────────────────────
+        ctk.CTkFrame(self, height=1, fg_color=_BORDE,
+                     corner_radius=0).pack(fill="x", padx=24, pady=(0, 10))
+
+        # ── Cabecera del log ──────────────────────────────────────────────────
+        fila_log_hdr = tk.Frame(self, bg=_BG)
+        fila_log_hdr.pack(fill="x", padx=26, pady=(0, 5))
+
+        tk.Label(fila_log_hdr, text="ACTIVIDAD",
+                 bg=_BG, fg=_DIM,
+                 font=("Segoe UI", 7, "bold")).pack(side="left")
+
+        tk.Button(fila_log_hdr, text="limpiar",
+                  bg=_BG, fg=_DIM, relief="flat", bd=0,
+                  font=("Segoe UI", 7), cursor="hand2",
+                  activebackground=_BG, activeforeground=_GRIS,
+                  command=self._limpiar_log).pack(side="right")
+
+        # ── Área de log ───────────────────────────────────────────────────────
+        log_frame = ctk.CTkFrame(self, fg_color=_PANEL,
+                                  corner_radius=10,
+                                  border_width=1, border_color=_BORDE)
+        log_frame.pack(fill="both", expand=True, padx=24, pady=(0, 24))
+
+        scroll = tk.Scrollbar(log_frame, bg=_PANEL,
+                               troughcolor=_PANEL, relief="flat", bd=0)
         scroll.pack(side="right", fill="y")
 
-        self._log = tk.Text(marco,
-                            bg=self._PANEL, fg="#c9d1d9",
+        self._log = tk.Text(log_frame,
+                            bg=_PANEL, fg="#c9d1d9",
                             font=("Consolas", 9),
-                            relief="flat", bd=8,
+                            relief="flat", bd=10,
                             state="disabled", wrap="word",
+                            cursor="arrow",
+                            selectbackground=_BORDE,
+                            inactiveselectbackground=_BORDE,
                             yscrollcommand=scroll.set)
         self._log.pack(fill="both", expand=True)
         scroll.config(command=self._log.yview)
 
-        self._log.tag_config("user",   foreground=self._AZUL)
-        self._log.tag_config("imai",   foreground=self._VERDE)
-        self._log.tag_config("tool",   foreground=self._AMARILLO)
-        self._log.tag_config("system", foreground=self._GRIS)
-        self._log.tag_config("error",  foreground=self._ROJO)
-        self._log.tag_config("dim",    foreground=self._DIM)
+        self._log.tag_config("ts",     foreground=_DIM)
+        self._log.tag_config("user",   foreground=_AZUL)
+        self._log.tag_config("imai",   foreground=_VERDE)
+        self._log.tag_config("tool",   foreground=_AMARILLO)
+        self._log.tag_config("system", foreground=_GRIS)
+        self._log.tag_config("error",  foreground=_ROJO)
+        self._log.tag_config("dim",    foreground=_DIM)
 
-    # ── log ──────────────────────────────────────────────────────────────────
+    # ── Log ──────────────────────────────────────────────────────────────────
 
     def _escribir_log(self, texto: str, tag: str = "dim"):
+        ts = datetime.now().strftime("%H:%M")
         self._log.config(state="normal")
+        self._log.insert("end", f"{ts}  ", "ts")
         self._log.insert("end", texto + "\n", tag)
         self._log.see("end")
+        self._log.config(state="disabled")
+
+    def _limpiar_log(self):
+        self._log.config(state="normal")
+        self._log.delete("1.0", "end")
         self._log.config(state="disabled")
 
     def _poll_log(self):
@@ -163,9 +226,18 @@ class ImaiApp:
                     self._escribir_log(msg, "dim")
         except queue.Empty:
             pass
-        self.root.after(100, self._poll_log)
+        self.after(100, self._poll_log)
 
-    # ── control ──────────────────────────────────────────────────────────────
+    # ── Animación ─────────────────────────────────────────────────────────────
+
+    def _animar_dot(self):
+        if self._corriendo:
+            self._pulso = not self._pulso
+            color = _VERDE if self._pulso else "#1a5c2a"
+            self._dot_cv.itemconfig(self._dot, fill=color)
+        self.after(600, self._animar_dot)
+
+    # ── Control ───────────────────────────────────────────────────────────────
 
     def _toggle(self):
         if not self._corriendo:
@@ -175,10 +247,11 @@ class ImaiApp:
 
     def _iniciar(self):
         self._corriendo = True
-        self._btn.config(text="⏹   DETENER",
-                         bg=self._ROJO, activebackground="#f85149")
-        self._var_estado.set("● Escuchando...")
-        self._lbl_estado.config(fg=self._VERDE)
+        self._btn.configure(text="⏹   DETENER",
+                            fg_color=_ROJO, hover_color="#f85149")
+        self._var_estado.set("Escuchando...")
+        self._lbl_estado.configure(text_color=_VERDE)
+        self._dot_cv.itemconfig(self._dot, fill=_VERDE)
 
         sys.stdout = _StdoutCapture(_log_queue)
 
@@ -202,10 +275,11 @@ class ImaiApp:
             pass
         self._corriendo = False
         sys.stdout = sys.__stdout__
-        self._btn.config(text="▶   INICIAR IMAI",
-                         bg="#238636", activebackground="#2ea043")
-        self._var_estado.set("● Detenido")
-        self._lbl_estado.config(fg=self._DIM)
+        self._btn.configure(text="▶   INICIAR IMAI",
+                            fg_color="#238636", hover_color="#2ea043")
+        self._var_estado.set("Detenido")
+        self._lbl_estado.configure(text_color=_DIM)
+        self._dot_cv.itemconfig(self._dot, fill=_DIM)
         self._escribir_log("Imai detenido.", "dim")
         self._actualizar_tray()
 
@@ -218,16 +292,16 @@ class ImaiApp:
         except Exception as e:
             _log_queue.put(f"Error: {e}")
         finally:
-            self.root.after(0, self._on_imai_exit)
+            self.after(0, self._on_imai_exit)
 
     def _on_imai_exit(self):
         if self._corriendo:
             self._detener()
 
-    # ── tray ─────────────────────────────────────────────────────────────────
+    # ── Tray ──────────────────────────────────────────────────────────────────
 
     def _ir_a_tray(self):
-        self.root.withdraw()
+        self.withdraw()
         if not self._tray:
             self._crear_tray()
 
@@ -235,19 +309,21 @@ class ImaiApp:
         menu = pystray.Menu(
             pystray.MenuItem("★ Imai — delta Crucis", None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Abrir", lambda: self.root.after(0, self._restaurar), default=True),
-            pystray.MenuItem("Dashboard",
-                             lambda: webbrowser.open("https://localhost:5000")),
+            pystray.MenuItem(
+                "Abrir", lambda: self.after(0, self._restaurar), default=True),
+            pystray.MenuItem(
+                "Dashboard", lambda: webbrowser.open("https://localhost:5000")),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Salir", self._salir),
         )
         self._tray = pystray.Icon("Imai", self._icono(), "Imai", menu)
-        threading.Thread(target=self._tray.run, daemon=True, name="tray").start()
+        threading.Thread(
+            target=self._tray.run, daemon=True, name="tray").start()
 
     def _restaurar(self):
-        self.root.deiconify()
-        self.root.lift()
-        self.root.focus_force()
+        self.deiconify()
+        self.lift()
+        self.focus_force()
         if self._tray:
             self._tray.stop()
             self._tray = None
@@ -270,11 +346,9 @@ class ImaiApp:
         size = 64
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-
         fondo = (35, 134, 54, 240) if self._corriendo else (22, 27, 34, 240)
         d.ellipse([2, 2, size - 2, size - 2],
                   fill=fondo, outline=(48, 54, 61, 255), width=2)
-
         cx, cy = size // 2, size // 2
         pts = []
         for i in range(10):
@@ -282,14 +356,8 @@ class ImaiApp:
             r = 20 if i % 2 == 0 else 8
             pts.append((cx + r * math.cos(angle), cy - r * math.sin(angle)))
         d.polygon(pts, fill=(88, 166, 255, 255))
-
         return img
-
-    # ── run ──────────────────────────────────────────────────────────────────
-
-    def run(self):
-        self.root.mainloop()
 
 
 if __name__ == "__main__":
-    ImaiApp().run()
+    ImaiApp().mainloop()
