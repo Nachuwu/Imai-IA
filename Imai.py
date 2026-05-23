@@ -19,6 +19,7 @@ from modules.rag import indexar_historial, buscar as rag_buscar, es_consulta_his
 import modules.recordatorios as recordatorios
 import modules.dashboard as dashboard
 import modules.camara as camara
+import modules.proactivo as proactivo
 from modules.contexto import get_app_activa
 from config import CIUDAD, WAKE_WORD
 
@@ -28,6 +29,7 @@ _dictando           = False
 _ultimo_clipboard   = ""
 _oraciones_habladas = 0
 _MAX_ORACIONES      = 3
+_ultimo_turno_ts    = None   # timestamp del último turno del usuario (para inactividad)
 
 # ---------------------------------------------------------------------------
 # Dictar — tabla de sustituciones de voz a símbolo
@@ -263,7 +265,7 @@ def _resumen_matutino():
 
 
 def main():
-    global _dictando, _ultimo_clipboard, _oraciones_habladas
+    global _dictando, _ultimo_clipboard, _oraciones_habladas, _ultimo_turno_ts
     limpiar()
     print("=" * 40)
     print("        IMAI  —  delta Crucis")
@@ -277,6 +279,7 @@ def main():
     indexar_historial()
     memoria.indexar_existentes()
     recordatorios.inicializar(hablar)
+    proactivo.inicializar(hablar, recordatorios.get_scheduler(), lambda: _ultimo_turno_ts)
     dashboard.iniciar()
     camara.iniciar()
 
@@ -316,6 +319,7 @@ def main():
             _turnos_conv = 0
             continue
 
+        _ultimo_turno_ts = time.time()
         print(f"Tu: {texto}")
         if "salir" in texto.lower():
             hablar("Hasta luego.")

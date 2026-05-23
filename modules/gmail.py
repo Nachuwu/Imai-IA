@@ -55,6 +55,34 @@ def _get_service():
     return _service
 
 
+def get_correos_raw(n=5):
+    """Retorna lista de dicts {id, de, asunto} para los últimos N correos."""
+    if not _disponible():
+        return []
+    try:
+        service  = _get_service()
+        results  = service.users().messages().list(
+            userId="me", labelIds=["INBOX"], maxResults=n
+        ).execute()
+        correos  = []
+        for ref in results.get("messages", [])[:n]:
+            msg  = service.users().messages().get(
+                userId="me", id=ref["id"],
+                format="metadata",
+                metadataHeaders=["From", "Subject"],
+            ).execute()
+            hdrs = {h["name"]: h["value"] for h in msg["payload"]["headers"]}
+            correos.append({
+                "id":     ref["id"],
+                "de":     re.sub(r"<.*?>", "", hdrs.get("From", "?")).strip(),
+                "asunto": hdrs.get("Subject", "(sin asunto)"),
+            })
+        return correos
+    except Exception as e:
+        print(f"[ gmail get_correos_raw error: {e} ]")
+        return []
+
+
 def leer_correos(n=5):
     """Retorna un resumen de los últimos N correos de la bandeja de entrada."""
     if not _disponible():
