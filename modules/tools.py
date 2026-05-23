@@ -276,10 +276,47 @@ def get_portapapeles():
         return "No pude acceder al portapapeles."
 
 # ---------------------------------------------------------------------------
-# Búsqueda web (DuckDuckGo Instant Answer — sin API key)
+# Búsqueda web (DuckDuckGo → Wikipedia — sin API key)
 # ---------------------------------------------------------------------------
 
+def _buscar_wikipedia(query):
+    """Fallback: busca en Wikipedia en español y devuelve el primer párrafo."""
+    try:
+        r = requests.get(
+            "https://es.wikipedia.org/api/rest_v1/page/summary/" + requests.utils.quote(query),
+            timeout=5,
+            headers={"User-Agent": "Imai-IA/1.0"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            extracto = data.get("extract", "")
+            if extracto:
+                return extracto[:500]
+        # Si no hay artículo exacto, buscar por texto
+        r2 = requests.get(
+            "https://es.wikipedia.org/w/api.php",
+            params={
+                "action": "query", "list": "search", "srsearch": query,
+                "format": "json", "srlimit": 1, "utf8": 1,
+            },
+            timeout=5,
+        )
+        resultados = r2.json().get("query", {}).get("search", [])
+        if resultados:
+            titulo = resultados[0]["title"]
+            r3 = requests.get(
+                "https://es.wikipedia.org/api/rest_v1/page/summary/" + requests.utils.quote(titulo),
+                timeout=5,
+                headers={"User-Agent": "Imai-IA/1.0"},
+            )
+            if r3.status_code == 200:
+                return r3.json().get("extract", "")[:500]
+    except Exception:
+        pass
+    return ""
+
 def buscar_web(query):
+    # 1. DuckDuckGo Instant Answer
     try:
         r = requests.get(
             "https://api.duckduckgo.com/",
@@ -290,16 +327,20 @@ def buscar_web(query):
         respuesta = data.get("AbstractText") or data.get("Answer") or ""
         if respuesta:
             return respuesta[:600]
-        # Intentar con los RelatedTopics
         temas = data.get("RelatedTopics", [])
         if temas and isinstance(temas[0], dict):
             texto = temas[0].get("Text", "")
             if texto:
                 return texto[:400]
-        return f"No encontré información directa sobre {query}."
     except Exception as e:
-        print(f"[ buscar_web error: {e} ]")
-        return "No pude conectarme al buscador ahora mismo."
+        print(f"[ buscar_web DDG error: {e} ]")
+
+    # 2. Wikipedia en español
+    wiki = _buscar_wikipedia(query)
+    if wiki:
+        return wiki
+
+    return f"No encontré información sobre '{query}'."
 
 # ---------------------------------------------------------------------------
 # Captura de pantalla
