@@ -286,7 +286,8 @@ def main():
     if sesion_previa:
         historial.extend(sesion_previa)
         print(f"[ Historial previo: {len(sesion_previa) // 2} turnos cargados ]")
-    _resumen_matutino()
+    if time.localtime().tm_hour < 12:
+        _resumen_matutino()
 
     import winsound
     _turnos_conv = 0
@@ -324,6 +325,7 @@ def main():
         if _dictando:
             if re.search(r"\b(para|detener|terminar|salir|fin)\s*(de\s*)?(dictar|dictado)\b", texto, re.IGNORECASE):
                 _dictando = False
+                _turnos_conv = 2
                 hablar("Modo dictar desactivado.")
             else:
                 txt_proc = _aplicar_subs_dictar(texto)
