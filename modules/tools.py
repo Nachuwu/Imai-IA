@@ -152,12 +152,6 @@ def buscar_archivos(nombre, carpeta=None, callback=None):
         return None
     return _buscar()
 
-def abrir_archivo(ruta):
-    if os.path.exists(ruta):
-        os.startfile(ruta)
-        return f"Abriendo {os.path.basename(ruta)}"
-    return f"No existe el archivo: {ruta}"
-
 # ---------------------------------------------------------------------------
 # Hora y fecha
 # ---------------------------------------------------------------------------
