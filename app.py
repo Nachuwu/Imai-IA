@@ -82,10 +82,37 @@ if __name__ == "__main__":
 
     splash = _splash()           # visible de inmediato
 
-    # Imports pesados — el usuario ve el splash mientras cargan
-    import customtkinter as ctk
-    from PIL import Image, ImageDraw
-    import pystray
+    # Imports pesados en hilo de fondo — splash sigue respondiendo
+    _loaded: dict = {}
+    _imports_done = threading.Event()
+
+    def _cargar():
+        import customtkinter
+        from PIL import Image, ImageDraw
+        import pystray
+        _loaded["ctk"]       = customtkinter
+        _loaded["Image"]     = Image
+        _loaded["ImageDraw"] = ImageDraw
+        _loaded["pystray"]   = pystray
+        _imports_done.set()
+
+    threading.Thread(target=_cargar, daemon=True).start()
+
+    # Esperar con el event loop activo (splash responde durante la espera)
+    def _check_listos():
+        if _imports_done.is_set():
+            splash.quit()
+        else:
+            splash.after(40, _check_listos)
+
+    splash.after(40, _check_listos)
+    splash.mainloop()
+    splash.destroy()
+
+    ctk       = _loaded["ctk"]
+    Image     = _loaded["Image"]
+    ImageDraw = _loaded["ImageDraw"]
+    pystray   = _loaded["pystray"]
 
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
