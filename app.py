@@ -91,6 +91,7 @@ if __name__ == "__main__":
         import customtkinter
         from PIL import Image, ImageDraw, ImageTk
         import pystray
+        import Imai  # pre-carga Imai y todas sus dependencias (faster_whisper, anthropic, etc.)
         _loaded["ctk"]       = customtkinter
         _loaded["Image"]     = Image
         _loaded["ImageDraw"] = ImageDraw
@@ -442,19 +443,19 @@ if __name__ == "__main__":
                 self._detener()
 
         def _iniciar(self):
+            # Fix: esperar sin bloquear la UI a que el hilo anterior muera
+            if self._imai_thread and self._imai_thread.is_alive():
+                self.after(150, self._iniciar)
+                return
             self._corriendo = True
             self._btn.configure(text="⏹   DETENER",
-                                fg_color=_ROJO, hover_color="#f85149")
+                                fg_color=_ROJO, hover_color="#f85149",
+                                state="normal")
             self._set_estado("Iniciando...", _GRIS, pulsar=False)
-
+            # Fix: limpiar chat al iniciar nueva sesión
+            self._limpiar_chat()
+            self._ultimo_msg_ts = None
             sys.stdout = _StdoutCapture(_log_queue)
-
-            try:
-                import Imai
-                Imai._STOP.clear()
-            except Exception:
-                pass
-
             self._imai_thread = threading.Thread(
                 target=self._run_imai, daemon=True, name="imai-main")
             self._imai_thread.start()
@@ -467,21 +468,50 @@ if __name__ == "__main__":
                 Imai._STOP.set()
             except Exception:
                 pass
+            try:
+                import modules.stt as _stt
+                _stt.parar()
+            except Exception:
+                pass
+            try:
+                import modules.tts as _tts
+                _tts.parar()
+            except Exception:
+                pass
+            try:
+                import modules.proactivo as _proact
+                _proact.pausar()
+            except Exception:
+                pass
             self._corriendo = False
-            self._pulsar        = False
-            self._turnos        = 0
-            self._ultimo_msg_ts = None
+            self._pulsar    = False
+            self._turnos    = 0
             self._var_turnos.set("")
             sys.stdout = sys.__stdout__
-            self._btn.configure(text="▶   INICIAR IMAI",
-                                fg_color="#238636", hover_color="#2ea043")
+            # Fix: deshabilitar botón hasta que el hilo muera realmente
+            self._btn.configure(text="⏳  Deteniendo...",
+                                fg_color=_DIM, hover_color=_DIM,
+                                state="disabled")
             self._set_estado("Detenido", _DIM, pulsar=False)
             self._agregar_sistema("Imai detenido")
             self._actualizar_tray()
+            self._aguardar_hilo()
+
+        def _aguardar_hilo(self):
+            """Polling no-bloqueante: re-habilita el botón cuando el hilo muere."""
+            if self._imai_thread and self._imai_thread.is_alive():
+                self.after(150, self._aguardar_hilo)
+            else:
+                self._btn.configure(text="▶   INICIAR IMAI",
+                                    fg_color="#238636", hover_color="#2ea043",
+                                    state="normal")
 
         def _run_imai(self):
             try:
                 import Imai
+                import modules.stt as _stt
+                Imai._STOP.clear()
+                _stt.limpiar_stop()
                 Imai.main()
             except SystemExit:
                 pass
@@ -493,6 +523,11 @@ if __name__ == "__main__":
         def _on_imai_exit(self):
             if self._corriendo:
                 self._detener()
+            else:
+                # hilo terminó solo (ej: "salir"), asegurar botón habilitado
+                self._btn.configure(text="▶   INICIAR IMAI",
+                                    fg_color="#238636", hover_color="#2ea043",
+                                    state="normal")
 
         # ── Tray ──────────────────────────────────────────────────────────────
 

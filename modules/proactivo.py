@@ -16,6 +16,17 @@ from config import DATA_DIR, CIUDAD, GMAIL_ENABLED
 _hablar_fn    = None
 _get_turno_fn = None   # callable → float timestamp del último turno del usuario
 _ESTADO_FILE  = os.path.join(DATA_DIR, "proactivo_estado.json")
+_activo       = False  # False mientras Imai está detenido
+
+
+def pausar():
+    global _activo
+    _activo = False
+
+
+def reanudar():
+    global _activo
+    _activo = True
 
 _WMO_LLUVIA = {51, 53, 55, 61, 63, 65, 71, 73, 75, 80, 81, 82, 95, 96, 99}
 _WMO_DESC   = {
@@ -51,6 +62,8 @@ def _guardar(estado):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _resumen_diario():
+    if not _activo:
+        return
     import modules.tools as t
     import modules.recordatorios as rec
 
@@ -95,6 +108,8 @@ def _resumen_diario():
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _check_clima():
+    if not _activo:
+        return
     import requests
     try:
         geo = requests.get(
@@ -137,6 +152,8 @@ def _check_clima():
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _check_correos():
+    if not _activo:
+        return
     if not GMAIL_ENABLED:
         return
     try:
@@ -181,6 +198,8 @@ def _check_correos():
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _check_inactividad():
+    if not _activo:
+        return
     if _get_turno_fn is None:
         return
     ahora  = time.time()
@@ -208,6 +227,7 @@ def inicializar(hablar_cb, scheduler, get_turno_fn):
     global _hablar_fn, _get_turno_fn
     _hablar_fn    = hablar_cb
     _get_turno_fn = get_turno_fn
+    reanudar()
 
     scheduler.add_job(_resumen_diario,   "cron",     hour=22, minute=0, id="proact_resumen",      replace_existing=True)
     scheduler.add_job(_check_clima,      "interval", minutes=60,        id="proact_clima",         replace_existing=True)
