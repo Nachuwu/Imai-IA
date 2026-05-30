@@ -28,6 +28,10 @@ _KEYWORDS = {"detente", "para", "espera", "basta", "alto", "stop"}
 def fue_interrumpido():
     return _evento_interrupcion.is_set()
 
+def parar():
+    """Interrumpe la reproducción TTS en curso (llamado al hacer Detener)."""
+    _evento_interrupcion.set()
+
 def hablar(texto):
     _evento_interrupcion.clear()
     evento_fin = threading.Event()

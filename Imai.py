@@ -307,6 +307,9 @@ def main():
         saludo = "Buenas tardes." if hora < 20 else "Buenas noches."
         _decir(saludo)
 
+    from modules.stt import limpiar_stop as _limpiar_stt_stop
+    _limpiar_stt_stop()
+
     import winsound
     _turnos_conv = 0
 
@@ -330,7 +333,7 @@ def main():
             _decir("Hasta luego.")
             break
 
-        if not texto:
+        if not texto or _STOP.is_set():
             _turnos_conv = 0
             continue
 
@@ -411,6 +414,10 @@ def main():
             print(f"\n[ Error al consultar Claude: {e} ]")
             winsound.Beep(300, 400)
             _decir("Tuve un problema. Intenta de nuevo.")
+            historial.pop()
+            continue
+
+        if _STOP.is_set():
             historial.pop()
             continue
 

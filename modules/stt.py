@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import tempfile
 import numpy as np
@@ -14,6 +15,17 @@ _oww_model  = None
 nivel_audio: float = 0.0   # RMS normalizado 0.0-1.0 para el waveform de la GUI
 _OWW_CHUNK = 1280   # 80 ms a 16 kHz
 _OWW_SCORE = 0.5    # umbral de activación
+
+# ---------------------------------------------------------------------------
+# Stop event — permite interrumpir escuchar() y esperar_wake_word()
+# ---------------------------------------------------------------------------
+_stop = threading.Event()
+
+def parar():
+    _stop.set()
+
+def limpiar_stop():
+    _stop.clear()
 
 # ---------------------------------------------------------------------------
 # Modo no molestar
@@ -139,7 +151,7 @@ def _esperar_oww():
     print("[ En espera... di 'Imai' para activar (OWW) ]", flush=True)
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
-            while True:
+            while not _stop.is_set():
                 chunk, _ = stream.read(_OWW_CHUNK)
                 audio = chunk.flatten().astype(np.float32) / 32768.0
                 prediccion = _oww_model.predict(audio)
@@ -162,7 +174,7 @@ def _esperar_whisper():
     print(f"[ En espera... di '{_WAKE_TARGET}' para activar ]", flush=True)
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
-            while True:
+            while not _stop.is_set():
                 chunk, _ = stream.read(step_n)
                 chunk = chunk.flatten()
                 buf   = np.roll(buf, -step_n)
@@ -204,6 +216,8 @@ def escuchar():
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             for _ in range(chunks_max):
+                if _stop.is_set():
+                    break
                 chunk, _ = stream.read(chunk_samples)
                 energia = _rms(chunk)
                 nivel_audio = min(1.0, float(energia) / max(umbral * 2, 1))
