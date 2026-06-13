@@ -2,8 +2,11 @@ import re
 import json
 import os
 import glob
+import logging
 import chromadb
 from sentence_transformers import SentenceTransformer
+
+_log = logging.getLogger(__name__)
 
 _PATRONES_HISTORIAL = [
     r"\b(recuerdas|recuerda|acordas|dijiste|dije|hablamos|conversamos)\b",
@@ -57,7 +60,7 @@ def indexar_historial():
                 )
                 nuevos += 1
 
-    print(f"RAG: {nuevos} entradas nuevas indexadas.")
+    _log.info("RAG: %d entradas nuevas indexadas.", nuevos)
 
 def buscar(query, n=3):
     total = _col.count()

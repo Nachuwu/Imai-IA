@@ -6,9 +6,12 @@ El token se guarda por separado en data/gmail_token.json.
 import os
 import re
 import base64
+import logging
 from email.mime.text import MIMEText
 
 from config import GMAIL_ENABLED
+
+_log = logging.getLogger(__name__)
 
 _ROOT       = os.path.join(os.path.dirname(__file__), "..")
 _CREDS_FILE = os.path.join(_ROOT, "data", "calendar_credentials.json")
@@ -79,7 +82,7 @@ def get_correos_raw(n=5):
             })
         return correos
     except Exception as e:
-        print(f"[ gmail get_correos_raw error: {e} ]")
+        _log.error("gmail get_correos_raw error: %s", e)
         return []
 
 

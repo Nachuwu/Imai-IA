@@ -197,6 +197,49 @@ CLAUDE_TOOLS = [
         },
     },
     {
+        "name": "crear_proyecto",
+        "description": "Registra un nuevo proyecto en el que el usuario está trabajando, con su estado inicial.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre": {"type": "string", "description": "Nombre del proyecto"},
+                "estado": {"type": "string", "description": "Estado inicial, ej: 'en curso', 'planeando', 'pausado'"},
+                "notas":  {"type": "string", "description": "Notas adicionales sobre el proyecto"},
+            },
+            "required": ["nombre"],
+        },
+    },
+    {
+        "name": "actualizar_proyecto",
+        "description": "Actualiza el estado, última acción o notas de un proyecto ya registrado. Si el proyecto no existe, lo crea. Úsala cuando el usuario cuente avances o cambios de estado de algo en lo que está trabajando.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre":        {"type": "string", "description": "Nombre del proyecto a actualizar"},
+                "estado":        {"type": "string", "description": "Nuevo estado, ej: 'en curso', 'pausado', 'terminado'"},
+                "ultima_accion": {"type": "string", "description": "Última acción o avance realizado en el proyecto"},
+                "notas":         {"type": "string", "description": "Notas adicionales"},
+            },
+            "required": ["nombre"],
+        },
+    },
+    {
+        "name": "listar_proyectos",
+        "description": "Muestra todos los proyectos registrados con su estado y última acción. Úsala cuando el usuario pregunte en qué está trabajando o cómo van sus proyectos.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "eliminar_proyecto",
+        "description": "Elimina un proyecto del seguimiento, por ejemplo cuando ya está completamente terminado y archivado.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre": {"type": "string", "description": "Nombre del proyecto a eliminar"},
+            },
+            "required": ["nombre"],
+        },
+    },
+    {
         "name": "no_molestar",
         "description": "Desactiva el micrófono temporalmente por un tiempo determinado",
         "input_schema": {

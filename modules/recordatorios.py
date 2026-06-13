@@ -6,11 +6,16 @@ import json
 import os
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
+from rapidfuzz import fuzz
+import modules.telegram as tg
 
 _scheduler = None
 _hablar_fn = None
 from config import DATA_DIR as _DATA_DIR
-_ARCHIVO = os.path.join(_DATA_DIR, "recordatorios.json")
+_ARCHIVO          = os.path.join(_DATA_DIR, "recordatorios.json")
+_HISTORIAL_ARCHIVO = os.path.join(_DATA_DIR, "historial_recordatorios.json")
+_PATRONES_ARCHIVO  = os.path.join(_DATA_DIR, "patrones_estado.json")
+_MAX_HISTORIAL     = 200
 
 
 def get_scheduler():
@@ -44,6 +49,7 @@ def crear(mensaje, cuando_str):
         replace_existing=True,
     )
     _guardar(job_id, mensaje, cuando_str)
+    _log_historial(mensaje, cuando)
 
     cuando_fmt = cuando.strftime("%d/%m a las %H:%M")
     return f"Listo, te recuerdo el {cuando_fmt}: {mensaje}."
@@ -124,8 +130,10 @@ def listar():
 
 def _disparar(mensaje, job_id):
     _eliminar_guardado(job_id)
+    texto = f"Recordatorio: {mensaje}"
     if _hablar_fn:
-        _hablar_fn(f"Recordatorio: {mensaje}")
+        _hablar_fn(texto)
+    tg.enviar(texto)
 
 
 def _guardar(job_id, mensaje, cuando_str, frecuencia=None):
@@ -195,3 +203,116 @@ def _restaurar():
             datos.pop(job_id, None)
         with open(_ARCHIVO, "w", encoding="utf-8") as f:
             json.dump(datos, f, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Historial de recordatorios puntuales (para detectar patrones de rutina)
+# ---------------------------------------------------------------------------
+
+def _cargar_historial():
+    if os.path.exists(_HISTORIAL_ARCHIVO):
+        try:
+            with open(_HISTORIAL_ARCHIVO, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+
+def _log_historial(mensaje, cuando):
+    historial = _cargar_historial()
+    historial.append({
+        "mensaje": mensaje,
+        "dia_semana": cuando.weekday(),
+        "hora": cuando.strftime("%H:%M"),
+    })
+    historial = historial[-_MAX_HISTORIAL:]
+    with open(_HISTORIAL_ARCHIVO, "w", encoding="utf-8") as f:
+        json.dump(historial, f, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Detección de patrones de rutina
+# ---------------------------------------------------------------------------
+
+_DIAS_SEMANA = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+
+
+def _cargar_patrones_estado():
+    if os.path.exists(_PATRONES_ARCHIVO):
+        try:
+            with open(_PATRONES_ARCHIVO, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"sugeridos": []}
+
+
+def marcar_sugerido(clave):
+    estado = _cargar_patrones_estado()
+    if clave not in estado["sugeridos"]:
+        estado["sugeridos"].append(clave)
+        with open(_PATRONES_ARCHIVO, "w", encoding="utf-8") as f:
+            json.dump(estado, f, ensure_ascii=False, indent=2)
+
+
+def _ya_es_recurrente(mensaje, dia_semana):
+    """Revisa si ya existe una alarma recurrente que cubra este mensaje y día."""
+    dia_nombre = _DIAS_SEMANA[dia_semana]
+    for info in _cargar_json().values():
+        frecuencia = info.get("frecuencia")
+        if not frecuencia:
+            continue
+        cubre_dia = (
+            frecuencia == "diario"
+            or (frecuencia == "entre_semana" and dia_semana <= 4)
+            or (frecuencia == "fines_de_semana" and dia_semana >= 5)
+            or frecuencia == dia_nombre
+        )
+        if cubre_dia and fuzz.ratio(mensaje.lower(), info["mensaje"].lower()) >= 75:
+            return True
+    return False
+
+
+def detectar_patrones(min_ocurrencias=3):
+    """
+    Busca recordatorios puntuales repetidos el mismo día de la semana y hora similar.
+    Retorna una lista de candidatos aún no sugeridos ni cubiertos por una alarma existente.
+    """
+    historial = _cargar_historial()
+    if len(historial) < min_ocurrencias:
+        return []
+
+    grupos = []
+    for entrada in historial:
+        hora_h   = entrada["hora"].split(":")[0]
+        agregado = False
+        for g in grupos:
+            if (g["dia_semana"] == entrada["dia_semana"]
+                    and g["hora"].split(":")[0] == hora_h
+                    and fuzz.ratio(g["mensajes"][0].lower(), entrada["mensaje"].lower()) >= 75):
+                g["mensajes"].append(entrada["mensaje"])
+                agregado = True
+                break
+        if not agregado:
+            grupos.append({
+                "mensajes": [entrada["mensaje"]],
+                "dia_semana": entrada["dia_semana"],
+                "hora": entrada["hora"],
+            })
+
+    estado     = _cargar_patrones_estado()
+    sugeridos  = set(estado["sugeridos"])
+    candidatos = []
+    for g in grupos:
+        if len(g["mensajes"]) < min_ocurrencias:
+            continue
+        mensaje = max(set(g["mensajes"]), key=g["mensajes"].count)
+        clave   = f"{mensaje.lower()}_{g['dia_semana']}_{g['hora']}"
+        if clave in sugeridos:
+            continue
+        if _ya_es_recurrente(mensaje, g["dia_semana"]):
+            continue
+        candidatos.append({"mensaje": mensaje, "dia_semana": g["dia_semana"], "hora": g["hora"], "clave": clave})
+
+    return candidatos

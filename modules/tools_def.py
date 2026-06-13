@@ -122,6 +122,28 @@ def ejecutar(nombre, args, hablar_cb=None):
             return f"Perfil actualizado: {campo} = {valor}."
         return "Necesito el campo y el valor."
 
+    # --- Proyectos ---
+    if nombre == "crear_proyecto":
+        import modules.proyectos as _proy
+        return _proy.crear(args.get("nombre", ""), args.get("estado"), args.get("notas"))
+
+    if nombre == "actualizar_proyecto":
+        import modules.proyectos as _proy
+        return _proy.actualizar(
+            args.get("nombre", ""),
+            args.get("estado"),
+            args.get("ultima_accion"),
+            args.get("notas"),
+        )
+
+    if nombre == "listar_proyectos":
+        import modules.proyectos as _proy
+        return _proy.listar()
+
+    if nombre == "eliminar_proyecto":
+        import modules.proyectos as _proy
+        return _proy.eliminar(args.get("nombre", ""))
+
     # --- No molestar ---
     if nombre == "no_molestar":
         segundos = args.get("segundos", 300)

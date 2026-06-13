@@ -1,13 +1,15 @@
 import os
+import logging
 import threading
 import time
-import tempfile
 import numpy as np
 from modules.utils import sin_acentos as _sin_acentos
 import sounddevice as sd
 import scipy.io.wavfile as wav
 from faster_whisper import WhisperModel
 from config import SAMPLE_RATE, CHUNK, SILENCIO_MAX, DURACION_MAX, UMBRAL_RMS, TEMP_WAV, GROQ_API_KEY, WAKE_WORD_MODEL, WAKE_WORD_TARGET
+
+_log = logging.getLogger(__name__)
 
 model       = None
 umbral      = UMBRAL_RMS
@@ -58,27 +60,26 @@ def _cargar_oww():
         openwakeword.utils.download_models()  # descarga melspectrogram.onnx y otros base si faltan
         from openwakeword.model import Model as OWWModel
         _oww_model = OWWModel(wakeword_models=[WAKE_WORD_MODEL], inference_framework="onnx")
-        print(f"[ Wake word OWW: {os.path.basename(WAKE_WORD_MODEL)} ]")
+        _log.info("Wake word OWW: %s", os.path.basename(WAKE_WORD_MODEL))
     except Exception as e:
-        print(f"[ openWakeWord no disponible, usando Whisper: {e} ]")
+        _log.warning("openWakeWord no disponible, usando Whisper: %s", e)
 
 
 def inicializar():
     global model
-    print("Cargando Whisper...")
+    _log.info("Cargando Whisper...")
     model = WhisperModel("small", device="cpu", compute_type="int8")
     modo = "Groq (nube)" if _groq_client else "local"
-    print(f"Whisper listo. STT: {modo}")
+    _log.info("Whisper listo. STT: %s", modo)
     _cargar_oww()
     calibrar_umbral()
-    print()
 
 def calibrar_umbral():
     global umbral
     chunk_samples = int(CHUNK * SAMPLE_RATE)
     n_chunks      = int(2.0 / CHUNK)
 
-    print("[ Calibrando micrófono... quédate en silencio ]", flush=True)
+    _log.info("Calibrando micrófono... quédate en silencio")
     rmss = []
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
@@ -86,12 +87,12 @@ def calibrar_umbral():
                 chunk, _ = stream.read(chunk_samples)
                 rmss.append(_rms(chunk))
     except sd.PortAudioError:
-        print("[ Calibración fallida, usando umbral por defecto ]")
+        _log.warning("Calibración fallida, usando umbral por defecto")
         return
 
     ruido_base = float(np.mean(rmss))
     umbral = int(np.clip(ruido_base * 2.5, 60, 350))
-    print(f"[ Umbral: {umbral} (ruido ambiente: {ruido_base:.0f}) ]")
+    _log.info("Umbral: %d (ruido ambiente: %.0f)", umbral, ruido_base)
 
 def _rms(chunk):
     return np.sqrt(np.mean(chunk.astype(np.float32) ** 2))
@@ -109,7 +110,7 @@ def _transcribir(archivo):
                 )
             return resultado.strip(), "es"
         except Exception as e:
-            print(f"[ Groq STT falló, usando local: {e} ]")
+            _log.warning("Groq STT falló, usando local: %s", e)
 
     segs, _ = model.transcribe(archivo, language="es")
     return " ".join(s.text for s in segs).strip(), "es"
@@ -148,7 +149,7 @@ def esperar_wake_word():
 
 
 def _esperar_oww():
-    print("[ En espera... di 'Imai' para activar (OWW) ]", flush=True)
+    _log.info("En espera... di 'Imai' para activar (OWW)")
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             while not _stop.is_set():
@@ -157,10 +158,10 @@ def _esperar_oww():
                 prediccion = _oww_model.predict(audio)
                 for nombre, score in prediccion.items():
                     if score >= _OWW_SCORE:
-                        print(f"[ Wake word detectado (OWW score={score:.2f}) ]", flush=True)
+                        _log.info("Wake word detectado (OWW score=%.2f)", score)
                         return
     except sd.PortAudioError as e:
-        print(f"[ Error de micrófono: {e} ]")
+        _log.error("Error de micrófono: %s", e)
 
 
 def _esperar_whisper():
@@ -171,7 +172,7 @@ def _esperar_whisper():
     step_n   = int(STEP_S   * SAMPLE_RATE)
     buf      = np.zeros(buf_n, dtype=np.int16)
 
-    print(f"[ En espera... di '{_WAKE_TARGET}' para activar ]", flush=True)
+    _log.info("En espera... di '%s' para activar", _WAKE_TARGET)
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             while not _stop.is_set():
@@ -193,14 +194,14 @@ def _esperar_whisper():
                     )
                     texto = " ".join(s.text for s in segs)
                     if texto.strip():
-                        print(f"[ Wake word escuchó: '{texto.strip()}' ]", flush=True)
+                        _log.debug("Wake word escuchó: '%s'", texto.strip())
                     if _es_wake_word(texto):
-                        print("[ Wake word detectado ]", flush=True)
+                        _log.info("Wake word detectado")
                         return
                 except Exception:
                     pass
     except sd.PortAudioError as e:
-        print(f"[ Error de micrófono: {e} ]")
+        _log.error("Error de micrófono: %s", e)
 
 def escuchar():
     chunk_samples       = int(CHUNK * SAMPLE_RATE)
@@ -225,7 +226,7 @@ def escuchar():
                 if not grabando:
                     if energia > umbral:
                         grabando = True
-                        print("\a[ ● Grabando ]", flush=True)
+                        _log.info("Grabando")
                         frames.append(chunk)
                 else:
                     frames.append(chunk)
@@ -236,20 +237,20 @@ def escuchar():
                     else:
                         chunks_silencio = 0
     except sd.PortAudioError as e:
-        print(f"[ Error de micrófono: {e} ]")
+        _log.error("Error de micrófono: %s", e)
         return "", None
 
     nivel_audio = 0.0
     if not frames:
-        print("[ Sin voz detectada ]")
+        _log.info("Sin voz detectada")
         return "", None
 
-    print("[ ■ Procesando... ]", flush=True)
+    _log.info("Procesando...")
     audio = np.concatenate(frames, axis=0)
     try:
         wav.write(TEMP_WAV, SAMPLE_RATE, audio)
         texto, idioma = _transcribir(TEMP_WAV)
         return texto, idioma
     except Exception as e:
-        print(f"[ Error al transcribir: {e} ]")
+        _log.error("Error al transcribir: %s", e)
         return "", None

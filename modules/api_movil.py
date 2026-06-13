@@ -7,8 +7,11 @@ import os
 import subprocess
 import tempfile
 import threading
+import logging
 
 from config import VOZ
+
+_log = logging.getLogger(__name__)
 
 _historial = []
 _lock      = threading.Lock()
@@ -102,7 +105,7 @@ def procesar(audio_bytes: bytes) -> tuple[str, bytes]:
             _historial.append({"role": "assistant", "content": respuesta or "Listo."})
 
         except Exception as e:
-            print(f"[ api_movil error: {e} ]")
+            _log.error("api_movil error: %s", e)
             respuesta = "Tuve un problema procesando el comando."
 
     return texto, _tts_bytes(respuesta or "Listo.")

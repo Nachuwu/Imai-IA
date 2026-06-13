@@ -6,11 +6,14 @@ import io
 import json
 import os
 import glob
+import logging
 import threading
 import time
 import cv2
 from flask import Flask, jsonify, render_template_string, Response, request, send_file
 from config import DATA_DIR
+
+_log = logging.getLogger(__name__)
 
 _ROOT     = os.path.join(os.path.dirname(__file__), "..")
 _HIST_DIR = os.path.join(_ROOT, "historial")
@@ -58,6 +61,10 @@ h1  { color: #58a6ff; font-size: 1.4rem; margin-bottom: 20px; letter-spacing: 1p
       <h2>Recordatorios</h2>
       <div id="recordatorios"><span class="empty">Cargando...</span></div>
     </div>
+    <div class="card">
+      <h2>Proyectos</h2>
+      <div id="proyectos"><span class="empty">Cargando...</span></div>
+    </div>
   </div>
   <div class="col" style="gap:16px">
     <div class="card">
@@ -93,9 +100,10 @@ function renderHist(filtro) {
 }
 
 async function cargar() {
-  const [mem, recs, hist] = await Promise.all([
+  const [mem, recs, proys, hist] = await Promise.all([
     fetch('/api/memoria').then(r => r.json()),
     fetch('/api/recordatorios').then(r => r.json()),
+    fetch('/api/proyectos').then(r => r.json()),
     fetch('/api/historial').then(r => r.json()),
   ]);
 
@@ -106,6 +114,10 @@ async function cargar() {
   document.getElementById('recordatorios').innerHTML = recs.length
     ? recs.map(r => `<div class="fact">• ${r.mensaje} <span style="color:#484f58">${r.cuando}</span></div>`).join('')
     : '<span class="empty">Sin recordatorios</span>';
+
+  document.getElementById('proyectos').innerHTML = proys.length
+    ? proys.map(p => `<div class="fact">• ${p.nombre} <span style="color:#484f58">(${p.estado})</span>${p.ultima_accion ? ' — ' + p.ultima_accion : ''}</div>`).join('')
+    : '<span class="empty">Sin proyectos</span>';
 
   _hist = hist;
   renderHist(document.getElementById('buscar').value);
@@ -139,6 +151,15 @@ def api_recordatorios():
         with open(os.path.join(DATA_DIR, "recordatorios.json"), encoding="utf-8") as f:
             datos = json.load(f)
         return jsonify([{"mensaje": v["mensaje"], "cuando": v["cuando"]} for v in datos.values()])
+    except Exception:
+        return jsonify([])
+
+
+@app.route("/api/proyectos")
+def api_proyectos():
+    try:
+        with open(os.path.join(DATA_DIR, "proyectos.json"), encoding="utf-8") as f:
+            return jsonify(json.load(f))
     except Exception:
         return jsonify([])
 
@@ -303,16 +324,15 @@ def api_comando():
         resp.headers["X-Texto"] = texto[:200] if texto else ""
         return resp
     except Exception as e:
-        print(f"[ /api/comando error: {e} ]")
+        _log.error("/api/comando error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
 def iniciar(puerto=5000):
-    log = __import__("logging")
-    log.getLogger("werkzeug").setLevel(log.ERROR)
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
     threading.Thread(
         target=lambda: app.run(host="0.0.0.0", port=puerto, debug=False, use_reloader=False, ssl_context="adhoc"),
         daemon=True,
         name="dashboard",
     ).start()
-    print(f"[ Dashboard: https://localhost:{puerto} ]")
+    _log.info("Dashboard: https://localhost:%d", puerto)

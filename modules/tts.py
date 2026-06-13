@@ -12,6 +12,8 @@ import sounddevice as sd
 import edge_tts
 from config import VOZ, AUDIO_FILE, PIPER_MODEL
 
+_log = logging.getLogger(__name__)
+
 
 def _sin_acentos(texto):
     return unicodedata.normalize("NFD", texto).encode("ascii", "ignore").decode("utf-8")
@@ -49,7 +51,7 @@ def hablar(texto):
         try:
             asyncio.run(_streaming(texto))
         except Exception as e:
-            print(f"[ TTS streaming falló, usando fallback: {e} ]")
+            _log.warning("TTS streaming falló, usando fallback: %s", e)
             _hablar_archivo(texto)
     else:
         _hablar_archivo(texto)
@@ -82,7 +84,7 @@ def _hablar_piper(texto):
                 return
             time.sleep(0.05)
     except Exception as e:
-        print(f"[ Piper falló: {e} ]")
+        _log.warning("Piper falló: %s", e)
         _hablar_archivo(texto)
 
 def _hablar_archivo(texto):
@@ -90,7 +92,7 @@ def _hablar_archivo(texto):
         generar(texto)
         reproducir()
     except Exception as e:
-        print(f"[ Error en TTS: {e} ]")
+        _log.error("Error en TTS: %s", e)
         _hablar_local(texto)
 
 def _hablar_local(texto):
@@ -169,7 +171,7 @@ def _monitor_keywords(evento_fin):
                     )
                     texto = _sin_acentos(" ".join(s.text for s in segs).lower().strip())
                     if any(k in texto for k in _KEYWORDS):
-                        print("\n[ Interrumpido ]", flush=True)
+                        _log.info("Interrumpido")
                         _evento_interrupcion.set()
                 except Exception:
                     pass

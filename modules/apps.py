@@ -1,10 +1,13 @@
 import os
 import glob
 import json
+import logging
 import subprocess
 import threading
 import time
 from rapidfuzz import process as fuzz
+
+_log = logging.getLogger(__name__)
 
 _CARPETAS_LNK = [
     os.path.expanduser(r"~\AppData\Roaming\Microsoft\Windows\Start Menu\Programs"),
@@ -83,7 +86,7 @@ def _escanear():
         try:
             _indice, _exe_indice = _cargar_cache()
             _escaneado.set()
-            print(f"[ {len(_indice)} apps cargadas desde caché ]")
+            _log.info("%d apps cargadas desde caché", len(_indice))
             return
         except Exception:
             pass
@@ -126,7 +129,7 @@ def _escanear():
     _exe_indice = tmp_exe
     _escaneado.set()
     _guardar_cache(tmp_abrir, tmp_exe)
-    print(f"[ {len(_indice)} apps indexadas y guardadas en caché ]")
+    _log.info("%d apps indexadas y guardadas en caché", len(_indice))
 
 # ---------------------------------------------------------------------------
 # Búsqueda y acciones

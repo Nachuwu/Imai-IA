@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import time
+import logging
 import threading
 import subprocess
 from modules.stt import escuchar, inicializar as inicializar_stt, esta_pausado, esperar_wake_word
@@ -14,6 +15,8 @@ import modules.tools as tools
 import modules.urls as urls
 import modules.historial as log
 import modules.memoria as memoria
+import modules.proyectos as proyectos
+import modules.backups as backups
 from modules.tools_def import ejecutar as ejecutar_tool
 from modules.claude_llm import consultar as claude_consultar
 from modules.rag import indexar_historial, buscar as rag_buscar, es_consulta_historial
@@ -23,6 +26,8 @@ import modules.camara as camara
 import modules.proactivo as proactivo
 from modules.contexto import get_app_activa
 from config import CIUDAD, WAKE_WORD
+
+_log = logging.getLogger(__name__)
 
 _STOP = threading.Event()
 
@@ -278,6 +283,7 @@ def _resumen_matutino():
 def main():
     global _dictando, _ultimo_clipboard, _oraciones_habladas, _ultimo_turno_ts
     limpiar()
+    _log.info("Imai iniciando...")
     print("=" * 40)
     print("        IMAI  —  delta Crucis")
     print("=" * 40)
@@ -285,10 +291,12 @@ def main():
     print("=" * 40)
     print()
 
+    backups.respaldar()
     inicializar_stt()
     apps.escanear_en_segundo_plano()
     indexar_historial()
     memoria.indexar_existentes()
+    proyectos.indexar_existentes()
     recordatorios.inicializar(_decir)
     proactivo.inicializar(_decir, recordatorios.get_scheduler(), lambda: _ultimo_turno_ts)
     dashboard.iniciar()
@@ -299,7 +307,7 @@ def main():
     sesion_previa = _cargar_historial_sesion()
     if sesion_previa:
         historial.extend(sesion_previa)
-        print(f"[ Historial previo: {len(sesion_previa) // 2} turnos cargados ]")
+        _log.info("Historial previo: %d turnos cargados", len(sesion_previa) // 2)
     hora = time.localtime().tm_hour
     if hora < 12:
         _resumen_matutino()
@@ -333,138 +341,146 @@ def main():
             _decir("Hasta luego.")
             break
 
-        if not texto or _STOP.is_set():
-            _turnos_conv = 0
-            continue
+        try:
+            if not texto or _STOP.is_set():
+                _turnos_conv = 0
+                continue
 
-        _ultimo_turno_ts = time.time()
-        print(f"Tu: {texto}")
-        if "salir" in texto.lower():
-            _decir("Hasta luego.")
-            break
+            _ultimo_turno_ts = time.time()
+            print(f"Tu: {texto}")
+            if "salir" in texto.lower():
+                _decir("Hasta luego.")
+                break
 
-        # Modo dictar — escribe directamente en la app activa
-        if _dictando:
-            if re.search(r"\b(para|detener|terminar|salir|fin)\s*(de\s*)?(dictar|dictado)\b", texto, re.IGNORECASE):
-                _dictando = False
+            # Modo dictar — escribe directamente en la app activa
+            if _dictando:
+                if re.search(r"\b(para|detener|terminar|salir|fin)\s*(de\s*)?(dictar|dictado)\b", texto, re.IGNORECASE):
+                    _dictando = False
+                    _turnos_conv = 2
+                    _decir("Modo dictar desactivado.")
+                else:
+                    txt_proc = _aplicar_subs_dictar(texto)
+                    partes   = txt_proc.split("\n")
+                    for i, parte in enumerate(partes):
+                        if parte.strip():
+                            tools.escribir_teclado(parte)
+                        if i < len(partes) - 1:
+                            tools.presionar_tecla("enter")
+                continue
+
+            # Fast path — ejecuta los comandos que reconoce, acumula el resto para LLM
+            textos    = _split_comandos(texto)
+            llm_partes = []
+            for t in textos:
+                manejado, intent, objeto = manejar_herramienta(t)
+                if manejado:
+                    log.guardar(
+                        messages=[
+                            {"role": "system",    "content": system_prompt},
+                            {"role": "user",      "content": t},
+                            {"role": "assistant", "content": ""},
+                        ],
+                        intent=intent, objeto=objeto, herramienta=True,
+                    )
+                else:
+                    llm_partes.append(t)
+
+            if not llm_partes:
                 _turnos_conv = 2
-                _decir("Modo dictar desactivado.")
-            else:
-                txt_proc = _aplicar_subs_dictar(texto)
-                partes   = txt_proc.split("\n")
-                for i, parte in enumerate(partes):
-                    if parte.strip():
-                        tools.escribir_teclado(parte)
-                    if i < len(partes) - 1:
-                        tools.presionar_tecla("enter")
-            continue
+                continue
 
-        # Fast path — ejecuta los comandos que reconoce, acumula el resto para LLM
-        textos    = _split_comandos(texto)
-        llm_partes = []
-        for t in textos:
-            manejado, intent, objeto = manejar_herramienta(t)
-            if manejado:
-                log.guardar(
-                    messages=[
-                        {"role": "system",    "content": system_prompt},
-                        {"role": "user",      "content": t},
-                        {"role": "assistant", "content": ""},
-                    ],
-                    intent=intent, objeto=objeto, herramienta=True,
-                )
-            else:
-                llm_partes.append(t)
+            # Si solo algunos fueron al fast path, LLM procesa el resto
+            if len(llm_partes) < len(textos):
+                texto = " y ".join(llm_partes)
 
-        if not llm_partes:
+            # LLM path — conversación y comandos ambiguos
+            historial = _truncar_historial(historial)
+
+            contenido_usuario = texto
+            if app_activa:
+                contenido_usuario = f"[App activa: {app_activa}]\n{contenido_usuario}"
+            if es_consulta_historial(texto):
+                fragmentos = rag_buscar(texto, n=3)
+                if fragmentos:
+                    contexto = "\n---\n".join(fragmentos)
+                    contenido_usuario = f"Contexto de conversaciones anteriores:\n{contexto}\n\nPregunta: {contenido_usuario}"
+
+            try:
+                import pyperclip as _pc
+                _clip = _pc.paste()
+                if _clip and _clip != _ultimo_clipboard and not _clip.startswith("http") and len(_clip) > 10:
+                    _ultimo_clipboard = _clip
+                    contenido_usuario = f"[Texto seleccionado: {_clip[:500]}]\n{contenido_usuario}"
+            except Exception:
+                pass
+
+            historial.append({"role": "user", "content": contenido_usuario})
+
+            _oraciones_habladas = 0
+            try:
+                respuesta, tool_calls = claude_consultar(historial, hablar_cb=_hablar_streaming)
+            except Exception as e:
+                _log.error("Error al consultar Claude: %s", e)
+                winsound.Beep(300, 400)
+                _decir("Tuve un problema. Intenta de nuevo.")
+                historial.pop()
+                continue
+
+            if _STOP.is_set():
+                historial.pop()
+                continue
+
+            if tool_calls:
+                resultados     = []
+                nombres_tools  = []
+                for tc in tool_calls:
+                    nombre = tc["function"]["name"]
+                    args   = tc["function"]["arguments"]
+                    nombres_tools.append(nombre)
+                    print(f"[ Tool: {nombre} ]")
+                    resultado = ejecutar_tool(nombre, args, hablar_cb=hablar)
+                    if resultado:
+                        _hablar_y_recordar(resultado)
+                    resultados.append(resultado)
+                    if nombre in ("guardar_memoria", "guardar_perfil", "actualizar_memoria",
+                                   "crear_proyecto", "actualizar_proyecto", "eliminar_proyecto"):
+                        system_prompt = get_system_prompt()
+                        historial[0]  = {"role": "system", "content": system_prompt}
+                    log.guardar(
+                        messages=[
+                            {"role": "system",    "content": system_prompt},
+                            {"role": "user",      "content": texto},
+                            {"role": "assistant", "content": resultado},
+                        ],
+                        intent=nombre, objeto=str(args), herramienta=True,
+                    )
+                historial.append({"role": "assistant", "content": " ".join(resultados)})
+                _guardar_historial_sesion(historial)
+                _SOLO_MEMORIA = {"actualizar_memoria", "guardar_memoria", "guardar_perfil"}
+                if any(n not in _SOLO_MEMORIA for n in nombres_tools):
+                    _turnos_conv = 2
+                continue
+
+            if fue_interrumpido():
+                historial.pop()
+                _decir("Okay.")
+                continue
+
+            print(f"Imai: {respuesta}")
+            historial.append({"role": "assistant", "content": respuesta})
             _turnos_conv = 2
-            continue
-
-        # Si solo algunos fueron al fast path, LLM procesa el resto
-        if len(llm_partes) < len(textos):
-            texto = " y ".join(llm_partes)
-
-        # LLM path — conversación y comandos ambiguos
-        historial = _truncar_historial(historial)
-
-        contenido_usuario = texto
-        if app_activa:
-            contenido_usuario = f"[App activa: {app_activa}]\n{contenido_usuario}"
-        if es_consulta_historial(texto):
-            fragmentos = rag_buscar(texto, n=3)
-            if fragmentos:
-                contexto = "\n---\n".join(fragmentos)
-                contenido_usuario = f"Contexto de conversaciones anteriores:\n{contexto}\n\nPregunta: {contenido_usuario}"
-
-        try:
-            import pyperclip as _pc
-            _clip = _pc.paste()
-            if _clip and _clip != _ultimo_clipboard and not _clip.startswith("http") and len(_clip) > 10:
-                _ultimo_clipboard = _clip
-                contenido_usuario = f"[Texto seleccionado: {_clip[:500]}]\n{contenido_usuario}"
-        except Exception:
-            pass
-
-        historial.append({"role": "user", "content": contenido_usuario})
-
-        _oraciones_habladas = 0
-        try:
-            respuesta, tool_calls = claude_consultar(historial, hablar_cb=_hablar_streaming)
-        except Exception as e:
-            print(f"\n[ Error al consultar Claude: {e} ]")
-            winsound.Beep(300, 400)
-            _decir("Tuve un problema. Intenta de nuevo.")
-            historial.pop()
-            continue
-
-        if _STOP.is_set():
-            historial.pop()
-            continue
-
-        if tool_calls:
-            resultados     = []
-            nombres_tools  = []
-            for tc in tool_calls:
-                nombre = tc["function"]["name"]
-                args   = tc["function"]["arguments"]
-                nombres_tools.append(nombre)
-                print(f"[ Tool: {nombre} ]")
-                resultado = ejecutar_tool(nombre, args, hablar_cb=hablar)
-                if resultado:
-                    _hablar_y_recordar(resultado)
-                resultados.append(resultado)
-                if nombre in ("guardar_memoria", "guardar_perfil", "actualizar_memoria"):
-                    system_prompt = get_system_prompt()
-                    historial[0]  = {"role": "system", "content": system_prompt}
-                log.guardar(
-                    messages=[
-                        {"role": "system",    "content": system_prompt},
-                        {"role": "user",      "content": texto},
-                        {"role": "assistant", "content": resultado},
-                    ],
-                    intent=nombre, objeto=str(args), herramienta=True,
-                )
-            historial.append({"role": "assistant", "content": " ".join(resultados)})
             _guardar_historial_sesion(historial)
-            _SOLO_MEMORIA = {"actualizar_memoria", "guardar_memoria", "guardar_perfil"}
-            if any(n not in _SOLO_MEMORIA for n in nombres_tools):
-                _turnos_conv = 2
-            continue
-
-        if fue_interrumpido():
-            historial.pop()
-            _decir("Okay.")
-            continue
-
-        print(f"Imai: {respuesta}")
-        historial.append({"role": "assistant", "content": respuesta})
-        _turnos_conv = 2
-        _guardar_historial_sesion(historial)
-        log.guardar(
-            messages=historial[-(MAX_TURNOS * 2):],
-            intent="ninguna",
-            herramienta=False,
-        )
+            log.guardar(
+                messages=historial[-(MAX_TURNOS * 2):],
+                intent="ninguna",
+                herramienta=False,
+            )
+        except Exception as e:
+            _log.error("Error inesperado en el loop principal: %s", e, exc_info=True)
+            winsound.Beep(200, 300)
+            if historial and historial[-1]["role"] == "user":
+                historial.pop()
+            _decir("Tuve un problema inesperado. Sigo escuchando.")
 
 
 if __name__ == "__main__":
@@ -472,3 +488,4 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nSaliendo...")
+        _log.info("Imai detenido (KeyboardInterrupt)")

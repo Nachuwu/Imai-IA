@@ -87,6 +87,7 @@ En modo dictar, puedes decir símbolos: **"punto"** → `.` · **"coma"** → `,
 | Guardar hechos | "recuerda que me gusta el café negro" |
 | Búsqueda semántica | "¿qué recuerdas sobre mis reuniones?" |
 | Historial con RAG | "¿recuerdas lo que hablamos ayer?" |
+| Hilo de proyectos | "estoy armando la web de la tienda", "¿en qué proyectos estoy?", "terminé el proyecto X" |
 
 ### Alertas proactivas
 Imai avisa sin que preguntes:
@@ -97,6 +98,11 @@ Imai avisa sin que preguntes:
 | Clima adverso | Cuando cambia a lluvia o tormenta (revisa cada hora) |
 | Correos importantes | Si llega un correo urgente, Claude lo detecta (revisa cada 15 min) |
 | Sin moverte | Avisa si llevas más de 45 minutos sin interactuar |
+
+Si configuras `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` en `.env`, estas alertas (y los recordatorios) también llegan a Telegram — útil si Imai está corriendo en un equipo que no siempre estás escuchando.
+
+### Cliente móvil
+Desde el navegador de tu celular, conectado a la misma red Wi-Fi que el PC, abre `http://<ip-del-pc>:5000/movil`: grabas un audio, Imai lo transcribe, ejecuta el comando o responde, y te devuelve la respuesta hablada — sin necesidad de estar frente al PC.
 
 ### Comandos encadenados
 ```
@@ -130,9 +136,14 @@ Micrófono → Wake word → STT → Intención → Herramienta O Claude LLM →
 | Google Calendar | Google Calendar API v3 con OAuth |
 | Gmail | Gmail API v1 con OAuth |
 | Memoria | JSON estructurado (perfil + hechos) + ChromaDB vectorial |
+| Proyectos | Hilo de proyectos en JSON + ChromaDB (mismo patrón que memoria) |
 | Historial | JSONL por día en formato ChatML + últimas 3 turns persistidas entre sesiones |
 | RAG | ChromaDB + sentence-transformers |
 | Dashboard | Flask en `http://localhost:5000` |
+| Cliente móvil | `/movil` + `/api/comando` — voz desde el celular vía Flask |
+| Notificaciones | Telegram Bot API (opcional) |
+| Backups | Copia diaria de `data/*.json` a `data/backups/`, retención 14 días |
+| Logging | Archivo rotativo `data/imai.log` + consola |
 
 ---
 
@@ -194,6 +205,10 @@ WAKE_WORD_TARGET=escuchame
 GOOGLE_CALENDAR_ENABLED=1
 GMAIL_ENABLED=1
 
+# Notificaciones por Telegram (opcional, deja vacío para desactivar)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+
 # Sensibilidad del micrófono
 UMBRAL_RMS=150
 SILENCIO_MAX=1.5
@@ -229,6 +244,18 @@ python Imai.py
 6. El dashboard está en **http://localhost:5000**
 
 > Si pyautogui se descontrola, mueve el mouse a la **esquina superior izquierda** para abortarlo.
+
+---
+
+## Inicio automático (Windows)
+
+Para que Imai arranque solo al iniciar sesión y se reinicie automáticamente si el proceso falla:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\instalar_tarea.ps1
+```
+
+Esto registra una Tarea Programada que reinicia Imai hasta 999 veces (cada 1 minuto) si termina con error.
 
 ---
 
@@ -276,10 +303,15 @@ Imai-IA/
 │   ├── recordatorios.py        # Recordatorios puntuales y recurrentes (APScheduler)
 │   ├── calendario.py           # Google Calendar API
 │   ├── gmail.py                # Gmail API
-│   ├── dashboard.py            # Dashboard web Flask (localhost:5000)
+│   ├── dashboard.py            # Dashboard web Flask (localhost:5000) + cliente móvil
+│   ├── api_movil.py            # Procesa comandos de voz del cliente móvil
 │   ├── urls.py                 # Apertura de sitios y búsquedas web
 │   ├── prompt.py               # System prompt dinámico con memoria y fecha
 │   ├── memoria.py              # Memoria persistente (JSON + ChromaDB vectorial)
+│   ├── proyectos.py            # Hilo de proyectos (JSON + ChromaDB)
+│   ├── proactivo.py            # Alertas proactivas (resumen, clima, correos, inactividad, patrones)
+│   ├── telegram.py             # Notificaciones por Telegram (opcional)
+│   ├── backups.py              # Respaldo diario de data/*.json
 │   ├── historial.py            # Log de conversaciones en formato ChatML
 │   ├── rag.py                  # Búsqueda semántica sobre el historial (ChromaDB)
 │   ├── contexto.py             # Detección de app activa y contexto de clipboard
@@ -294,16 +326,20 @@ Imai-IA/
 │   └── imai.onnx                       # Modelo wake word personalizado (opcional)
 ├── data/                       # Archivos de runtime (ignorados por git)
 │   ├── memoria.json            # Perfil + hechos del usuario
+│   ├── proyectos.json          # Hilo de proyectos del usuario
 │   ├── recordatorios.json      # Recordatorios activos
 │   ├── apps_cache.json         # Caché de apps instaladas
 │   ├── spotify_historial.json  # Historial de canciones
 │   ├── calendar_credentials.json  # Credenciales OAuth Google
 │   ├── calendar_token.json     # Token Calendar (generado automáticamente)
-│   └── gmail_token.json        # Token Gmail (generado automáticamente)
+│   ├── gmail_token.json        # Token Gmail (generado automáticamente)
+│   ├── imai.log                # Log rotativo (errores y eventos)
+│   └── backups/                # Copias automáticas de los .json al iniciar
 ├── historial/                  # Log de conversaciones por día (ignorado por git)
 ├── chroma_db/                  # Base vectorial ChromaDB (ignorado por git)
 ├── scripts/
-│   └── grabar_wake_word.py     # Graba clips para entrenar el wake word
+│   ├── grabar_wake_word.py     # Graba clips para entrenar el wake word
+│   └── instalar_tarea.ps1      # Registra Imai en el Programador de tareas de Windows
 └── audio/                      # Archivos de audio temporales
 ```
 
@@ -383,3 +419,6 @@ APScheduler necesita que el proceso siga corriendo. No cierres Imai antes de que
 
 **pyautogui se descontrola**
 Mueve el mouse a la esquina superior izquierda para activar el failsafe y abortar.
+
+**Quiero ver el detalle de un error**
+Revisa `data/imai.log` (log rotativo) — ahí quedan los errores y avisos que no se muestran en consola.

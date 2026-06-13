@@ -3,11 +3,14 @@ Cámara en segundo plano — captura frames continuamente en un hilo daemon.
 El último frame queda disponible en memoria para consultas instantáneas.
 """
 import os
+import logging
 import threading
 import time
 
 import cv2
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 _frame_lock  = threading.Lock()
 _ultimo_frame = None   # numpy array BGR
@@ -21,11 +24,11 @@ def _bucle_camara(indice: int):
 
     cap = cv2.VideoCapture(indice, cv2.CAP_DSHOW)
     if not cap.isOpened():
-        print(f"[ Cámara {indice}: no se pudo abrir ]")
+        _log.warning("Cámara %d: no se pudo abrir", indice)
         _activa = False
         return
 
-    print(f"[ Cámara {indice} activa en segundo plano ]")
+    _log.info("Cámara %d activa en segundo plano", indice)
     while _activa:
         ok, frame = cap.read()
         if ok:
@@ -34,7 +37,7 @@ def _bucle_camara(indice: int):
         time.sleep(_INTERVALO)
 
     cap.release()
-    print("[ Cámara detenida ]")
+    _log.info("Cámara detenida")
 
 
 def iniciar(indice: int = 0):

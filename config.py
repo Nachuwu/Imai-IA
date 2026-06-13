@@ -1,4 +1,6 @@
 import os
+import logging
+from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -7,6 +9,18 @@ load_dotenv()
 _ROOT    = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(_ROOT, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Logging — archivo rotativo (sobrevive aunque corra sin consola, vía pythonw.exe)
+LOG_FILE = os.path.join(DATA_DIR, "imai.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
 
 # Si se define FFMPEG_BIN en .env, lo agrega al PATH del proceso actual
 _ffmpeg_bin = os.getenv("FFMPEG_BIN", "")
@@ -26,6 +40,9 @@ WAKE_WORD_MODEL    = os.path.join(_ROOT, _ww_model_rel) if _ww_model_rel else ""
 
 GOOGLE_CALENDAR_ENABLED = os.getenv("GOOGLE_CALENDAR_ENABLED", "0") == "1"
 GMAIL_ENABLED           = os.getenv("GMAIL_ENABLED",           "0") == "1"
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID",   "")
 
 SAMPLE_RATE  = 16000
 CHUNK        = 0.3

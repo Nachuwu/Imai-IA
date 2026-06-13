@@ -8,10 +8,14 @@ Alertas proactivas sin que el usuario pregunte:
 import glob
 import json
 import os
+import logging
 import time
 from datetime import datetime
 
 from config import DATA_DIR, CIUDAD, GMAIL_ENABLED
+import modules.telegram as tg
+
+_log = logging.getLogger(__name__)
 
 _hablar_fn    = None
 _get_turno_fn = None   # callable → float timestamp del último turno del usuario
@@ -28,6 +32,13 @@ def reanudar():
     global _activo
     _activo = True
 
+
+def _avisar(mensaje):
+    """Notifica una alerta proactiva por voz y, si está configurado, por Telegram."""
+    if _hablar_fn:
+        _hablar_fn(mensaje)
+    tg.enviar(mensaje)
+
 _WMO_LLUVIA = {51, 53, 55, 61, 63, 65, 71, 73, 75, 80, 81, 82, 95, 96, 99}
 _WMO_DESC   = {
     51: "llovizna leve",  53: "llovizna",       55: "llovizna fuerte",
@@ -38,6 +49,8 @@ _WMO_DESC   = {
 }
 
 _INACTIVIDAD_MIN = 45
+
+_DIAS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Estado persistente
@@ -100,8 +113,7 @@ def _resumen_diario():
     except Exception:
         pass
 
-    if _hablar_fn:
-        _hablar_fn(" ".join(partes))
+    _avisar(" ".join(partes))
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Clima — cada hora
@@ -139,8 +151,7 @@ def _check_clima():
             desc = _WMO_DESC.get(codigo, "condiciones adversas")
             estado.update({"clima_codigo_anterior": codigo, "clima_era_adverso": True})
             _guardar(estado)
-            if _hablar_fn:
-                _hablar_fn(f"Aviso de clima: {desc} en {CIUDAD}, {temp} grados.")
+            _avisar(f"Aviso de clima: {desc} en {CIUDAD}, {temp} grados.")
         elif codigo not in _WMO_LLUVIA and era_adverso:
             estado.update({"clima_codigo_anterior": codigo, "clima_era_adverso": False})
             _guardar(estado)
@@ -188,10 +199,9 @@ def _check_correos():
         texto = resp.content[0].text.strip()
         if texto.upper().startswith("SÍ") or texto.upper().startswith("SI"):
             mensaje = texto.split(":", 1)[-1].strip() if ":" in texto else texto
-            if _hablar_fn:
-                _hablar_fn(f"Tienes un correo importante: {mensaje}")
+            _avisar(f"Tienes un correo importante: {mensaje}")
     except Exception as e:
-        print(f"[ proactivo correos error: {e} ]")
+        _log.error("proactivo correos error: %s", e)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Inactividad — cada 5 min
@@ -216,8 +226,29 @@ def _check_inactividad():
     _guardar(estado)
 
     minutos = int((ahora - ultimo) / 60)
-    if _hablar_fn:
-        _hablar_fn(f"Llevas {minutos} minutos sin interactuar. Considera levantarte, tomar agua o estirar.")
+    _avisar(f"Llevas {minutos} minutos sin interactuar. Considera levantarte, tomar agua o estirar.")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Patrones de rutina en recordatorios — domingo 21:00
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _check_patrones():
+    if not _activo:
+        return
+    try:
+        import modules.recordatorios as rec
+        candidatos = rec.detectar_patrones()
+        if not candidatos:
+            return
+        c   = candidatos[0]
+        dia = _DIAS_ES[c["dia_semana"]]
+        rec.marcar_sugerido(c["clave"])
+        _avisar(
+            f"Note que pediste recordatorio de {c['mensaje']} los {dia} a las {c['hora']} "
+            f"varias semanas seguidas. Si quieres, dime que lo convierta en alarma recurrente."
+        )
+    except Exception as e:
+        _log.error("proactivo patrones error: %s", e)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Inicialización
@@ -233,5 +264,6 @@ def inicializar(hablar_cb, scheduler, get_turno_fn):
     scheduler.add_job(_check_clima,      "interval", minutes=60,        id="proact_clima",         replace_existing=True)
     scheduler.add_job(_check_correos,    "interval", minutes=15,        id="proact_correos",       replace_existing=True)
     scheduler.add_job(_check_inactividad,"interval", minutes=5,         id="proact_inactividad",   replace_existing=True)
+    scheduler.add_job(_check_patrones,   "cron", day_of_week="sun", hour=21, minute=0, id="proact_patrones", replace_existing=True)
 
-    print("[ Proactivo: resumen 22:00 · clima/hora · correos/15min · inactividad/5min ]")
+    _log.info("Proactivo: resumen 22:00 · clima/hora · correos/15min · inactividad/5min · patrones dom 21:00")

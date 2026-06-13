@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -41,10 +42,8 @@ def _indexar(texto, doc_id=None):
         return
     try:
         if doc_id is None:
-            doc_id = f"mem_{abs(hash(texto))}"
-        existentes = set(col.get()["ids"])
-        if doc_id not in existentes:
-            col.add(ids=[doc_id], documents=[texto])
+            doc_id = f"mem_{hashlib.md5(texto.encode('utf-8')).hexdigest()}"
+        col.upsert(ids=[doc_id], documents=[texto])
     except Exception:
         pass
 

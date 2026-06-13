@@ -3,6 +3,7 @@ import re
 import ast
 import glob
 import json
+import logging
 import operator
 import threading
 import time
@@ -14,6 +15,8 @@ from PIL import ImageGrab
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Volumen
@@ -327,7 +330,7 @@ def buscar_web(query):
             if texto:
                 return texto[:400]
     except Exception as e:
-        print(f"[ buscar_web DDG error: {e} ]")
+        _log.warning("buscar_web DDG error: %s", e)
 
     # 2. Wikipedia en español
     wiki = _buscar_wikipedia(query)
@@ -354,7 +357,7 @@ def captura_pantalla():
         ruta = _captura_ruta()
         return f"Captura guardada como {os.path.basename(ruta)}."
     except Exception as e:
-        print(f"[ captura_pantalla error: {e} ]")
+        _log.error("captura_pantalla error: %s", e)
         return "No pude tomar la captura de pantalla."
 
 def analizar_pantalla(pregunta="¿Qué hay en esta pantalla?"):
@@ -364,13 +367,13 @@ def analizar_pantalla(pregunta="¿Qué hay en esta pantalla?"):
             ruta = f.name
         ImageGrab.grab().save(ruta)
     except Exception as e:
-        print(f"[ analizar_pantalla captura error: {e} ]")
+        _log.error("analizar_pantalla captura error: %s", e)
         return "No pude tomar la captura de pantalla."
     try:
         from modules.claude_llm import analizar_imagen
         return analizar_imagen(ruta, pregunta)
     except Exception as e:
-        print(f"[ analizar_pantalla error: {e} ]")
+        _log.error("analizar_pantalla error: %s", e)
         return "No pude analizar la pantalla."
     finally:
         try:
@@ -506,7 +509,7 @@ def controlar_ventana(accion, titulo=None):
         if accion == "enfocar":
             win.activate();  return f"Cambié a '{nombre}'."
     except Exception as e:
-        print(f"[ controlar_ventana error: {e} ]")
+        _log.error("controlar_ventana error: %s", e)
         return "No pude controlar esa ventana."
 
     return f"Acción '{accion}' no reconocida."
@@ -622,7 +625,7 @@ def ver_camara(pregunta="¿Cómo está la persona frente a la cámara?"):
     try:
         return analizar_imagen(ruta, pregunta + " Enfócate en la persona: expresión, postura, estado de ánimo, ropa.")
     except Exception as ex:
-        print(f"[ ver_camara error: {ex} ]")
+        _log.error("ver_camara error: %s", ex)
         return "No pude analizar la imagen de la cámara."
 
 def describir_entorno(pregunta="¿Qué hay en el entorno?"):
@@ -635,7 +638,7 @@ def describir_entorno(pregunta="¿Qué hay en el entorno?"):
     try:
         return analizar_imagen(ruta, pregunta + " Enfócate en el entorno: objetos, habitación, fondo, iluminación.")
     except Exception as ex:
-        print(f"[ describir_entorno error: {ex} ]")
+        _log.error("describir_entorno error: %s", ex)
         return "No pude analizar el entorno."
 
 def click_en_texto(texto):
@@ -696,7 +699,7 @@ def click_en_texto(texto):
     # Revertir resize y aplicar escala DPI
     x = int(int(m.group(1)) / factor * sx)
     y = int(int(m.group(2)) / factor * sy)
-    print(f"[ click_en_texto: → ({x},{y}) factor={factor:.2f} escala={sx:.2f},{sy:.2f} ]")
+    _log.debug("click_en_texto: → (%d,%d) factor=%.2f escala=%.2f,%.2f", x, y, factor, sx, sy)
     _pag.click(x, y)
     return f"Hice clic en '{texto}'."
 
@@ -735,7 +738,7 @@ def leer_url(url=None, pregunta=None):
             tag.decompose()
         contenido = soup.get_text(separator=" ", strip=True)[:3000]
     except Exception as e:
-        print(f"[ leer_url error: {e} ]")
+        _log.error("leer_url error: %s", e)
         return "No pude acceder a esa página web."
 
     if not contenido:
