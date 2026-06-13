@@ -8,9 +8,11 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from rapidfuzz import fuzz
 import modules.telegram as tg
+from modules.utils import guardar_json
 
 _scheduler = None
 _hablar_fn = None
+_ultimo_creado = None
 from config import DATA_DIR as _DATA_DIR
 _ARCHIVO          = os.path.join(_DATA_DIR, "recordatorios.json")
 _HISTORIAL_ARCHIVO = os.path.join(_DATA_DIR, "historial_recordatorios.json")
@@ -25,6 +27,11 @@ def get_scheduler():
 def inicializar(hablar_cb):
     global _scheduler, _hablar_fn
     _hablar_fn = hablar_cb
+    if _scheduler is not None:
+        try:
+            _scheduler.shutdown(wait=False)
+        except Exception:
+            pass
     _scheduler = BackgroundScheduler(timezone="America/Santiago")
     _scheduler.start()
     _restaurar()
@@ -50,6 +57,9 @@ def crear(mensaje, cuando_str):
     )
     _guardar(job_id, mensaje, cuando_str)
     _log_historial(mensaje, cuando)
+
+    global _ultimo_creado
+    _ultimo_creado = job_id
 
     cuando_fmt = cuando.strftime("%d/%m a las %H:%M")
     return f"Listo, te recuerdo el {cuando_fmt}: {mensaje}."
@@ -88,6 +98,9 @@ def crear_recurrente(mensaje, hora_str, frecuencia):
     )
     _guardar(job_id, mensaje, hora_str, frecuencia=frecuencia)
 
+    global _ultimo_creado
+    _ultimo_creado = job_id
+
     freq_txt = {"diario": "todos los días", "entre_semana": "de lunes a viernes",
                 "fines_de_semana": "los fines de semana"}.get(
         frecuencia.lower(), f"cada {frecuencia}")
@@ -95,6 +108,13 @@ def crear_recurrente(mensaje, hora_str, frecuencia):
 
 
 def cancelar_ultimo():
+    global _ultimo_creado
+    if _ultimo_creado and _scheduler.get_job(_ultimo_creado):
+        _eliminar_guardado(_ultimo_creado)
+        _scheduler.remove_job(_ultimo_creado)
+        _ultimo_creado = None
+        return "Último recordatorio cancelado."
+
     jobs = _scheduler.get_jobs()
     if not jobs:
         return "No hay recordatorios pendientes."
@@ -142,16 +162,14 @@ def _guardar(job_id, mensaje, cuando_str, frecuencia=None):
     if frecuencia:
         entrada["frecuencia"] = frecuencia
     datos[job_id] = entrada
-    with open(_ARCHIVO, "w", encoding="utf-8") as f:
-        json.dump(datos, f, ensure_ascii=False, indent=2)
+    guardar_json(_ARCHIVO, datos)
 
 
 def _eliminar_guardado(job_id):
     datos = _cargar_json()
     if job_id in datos:
         datos.pop(job_id)
-        with open(_ARCHIVO, "w", encoding="utf-8") as f:
-            json.dump(datos, f, ensure_ascii=False, indent=2)
+        guardar_json(_ARCHIVO, datos)
 
 
 def _cargar_json():
@@ -201,8 +219,7 @@ def _restaurar():
     if viejos:
         for job_id in viejos:
             datos.pop(job_id, None)
-        with open(_ARCHIVO, "w", encoding="utf-8") as f:
-            json.dump(datos, f, ensure_ascii=False, indent=2)
+        guardar_json(_ARCHIVO, datos)
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +244,7 @@ def _log_historial(mensaje, cuando):
         "hora": cuando.strftime("%H:%M"),
     })
     historial = historial[-_MAX_HISTORIAL:]
-    with open(_HISTORIAL_ARCHIVO, "w", encoding="utf-8") as f:
-        json.dump(historial, f, ensure_ascii=False, indent=2)
+    guardar_json(_HISTORIAL_ARCHIVO, historial)
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +268,7 @@ def marcar_sugerido(clave):
     estado = _cargar_patrones_estado()
     if clave not in estado["sugeridos"]:
         estado["sugeridos"].append(clave)
-        with open(_PATRONES_ARCHIVO, "w", encoding="utf-8") as f:
-            json.dump(estado, f, ensure_ascii=False, indent=2)
+        guardar_json(_PATRONES_ARCHIVO, estado)
 
 
 def _ya_es_recurrente(mensaje, dia_semana):

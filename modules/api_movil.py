@@ -29,11 +29,16 @@ def _webm_a_wav(audio_bytes: bytes) -> str:
         f.write(audio_bytes)
         ruta_in = f.name
     ruta_out = ruta_in.replace(".webm", ".wav")
-    subprocess.run(
-        [_ffmpeg_cmd(), "-y", "-i", ruta_in, "-ar", "16000", "-ac", "1", ruta_out],
-        capture_output=True,
-    )
-    os.unlink(ruta_in)
+    try:
+        resultado = subprocess.run(
+            [_ffmpeg_cmd(), "-y", "-i", ruta_in, "-ar", "16000", "-ac", "1", ruta_out],
+            capture_output=True, timeout=30,
+        )
+    finally:
+        os.unlink(ruta_in)
+
+    if resultado.returncode != 0 or not os.path.exists(ruta_out):
+        raise RuntimeError("ffmpeg no pudo convertir el audio recibido")
     return ruta_out
 
 def _tts_bytes(texto: str) -> bytes:
@@ -53,10 +58,10 @@ def _tts_bytes(texto: str) -> bytes:
 # Procesamiento principal
 # ──────────────────────────────────────────────────────────────────────────────
 
-def procesar(audio_bytes: bytes) -> tuple[str, bytes]:
+def procesar(audio_bytes: bytes) -> tuple[str, str, bytes]:
     """
     Recibe bytes de audio WebM.
-    Retorna (texto_transcrito, audio_mp3_respuesta).
+    Retorna (texto_transcrito, texto_respuesta, audio_mp3_respuesta).
     """
     # 1. Transcribir
     ruta_wav = _webm_a_wav(audio_bytes)
@@ -70,7 +75,8 @@ def procesar(audio_bytes: bytes) -> tuple[str, bytes]:
             pass
 
     if not texto or not texto.strip():
-        return "", _tts_bytes("No entendí lo que dijiste.")
+        msg = "No entendí lo que dijiste."
+        return "", msg, _tts_bytes(msg)
 
     # 2. Procesar con LLM (historial móvil propio, sin hablar por el PC)
     from modules.prompt import get_system_prompt
@@ -83,29 +89,32 @@ def procesar(audio_bytes: bytes) -> tuple[str, bytes]:
 
         _historial.append({"role": "user", "content": texto})
 
-        # Mantener máximo 10 turnos
-        sistema  = _historial[:1]
-        mensajes = _historial[1:]
-        if len(mensajes) > 20:
-            mensajes = mensajes[-20:]
-        historial_actual = sistema + mensajes
+        # Mantener máximo 10 turnos (1 system + 20 mensajes)
+        historial_actual = _historial[:1] + _historial[-20:]
 
-        respuesta = ""
-        try:
-            respuesta, tool_calls = consultar(historial_actual)  # sin hablar_cb
+    # Fuera del lock: la llamada al LLM y la ejecución de tools pueden tardar
+    # (red, o incluso esperar confirmación por voz en el PC) y no deben
+    # bloquear otras requests del cliente móvil.
+    try:
+        respuesta, tool_calls = consultar(historial_actual)  # sin hablar_cb
 
-            if tool_calls:
-                resultados = []
-                for tc in tool_calls:
-                    res = ejecutar(tc["function"]["name"], tc["function"]["arguments"])
-                    if res:
-                        resultados.append(res)
-                respuesta = " ".join(resultados)
+        if tool_calls:
+            resultados = []
+            for tc in tool_calls:
+                res = ejecutar(tc["function"]["name"], tc["function"]["arguments"])
+                if res:
+                    resultados.append(res)
+            respuesta = " ".join(resultados)
 
-            _historial.append({"role": "assistant", "content": respuesta or "Listo."})
+    except Exception as e:
+        _log.error("api_movil error: %s", e)
+        respuesta = "Tuve un problema procesando el comando."
 
-        except Exception as e:
-            _log.error("api_movil error: %s", e)
-            respuesta = "Tuve un problema procesando el comando."
+    respuesta = respuesta or "Listo."
 
-    return texto, _tts_bytes(respuesta or "Listo.")
+    with _lock:
+        _historial.append({"role": "assistant", "content": respuesta})
+        if len(_historial) > 21:
+            _historial[:] = _historial[:1] + _historial[-20:]
+
+    return texto, respuesta, _tts_bytes(respuesta)

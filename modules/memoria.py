@@ -3,6 +3,7 @@ import json
 import os
 import re
 from config import DATA_DIR as _DATA_DIR
+from modules.utils import guardar_json
 
 _ARCHIVO   = os.path.join(_DATA_DIR, "memoria.json")
 _COL_MEM   = None   # ChromaDB collection (lazy)
@@ -22,8 +23,7 @@ def cargar():
 
 
 def guardar(datos):
-    with open(_ARCHIVO, "w", encoding="utf-8") as f:
-        json.dump(datos, f, ensure_ascii=False, indent=2)
+    guardar_json(_ARCHIVO, datos)
 
 
 def _get_col():

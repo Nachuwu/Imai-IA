@@ -11,6 +11,7 @@ import numpy as np
 import sounddevice as sd
 import edge_tts
 from config import VOZ, AUDIO_FILE, PIPER_MODEL
+from modules.utils import MIC_LOCK
 
 _log = logging.getLogger(__name__)
 
@@ -151,6 +152,12 @@ def _monitor_keywords(evento_fin):
     sample_rate = 16000
     chunk_samples = int(1.5 * sample_rate)
 
+    # No bloqueante: si el loop principal ya tiene el micrófono (ej. escuchando
+    # al usuario), se omite el monitor de interrupción para esta locución
+    # en vez de abrir un segundo InputStream en paralelo.
+    if not MIC_LOCK.acquire(blocking=False):
+        return
+
     try:
         with sd.InputStream(samplerate=sample_rate, channels=1, dtype="int16") as stream:
             while not evento_fin.is_set() and not _evento_interrupcion.is_set():
@@ -177,6 +184,8 @@ def _monitor_keywords(evento_fin):
                     pass
     except Exception:
         pass
+    finally:
+        MIC_LOCK.release()
 
 def generar(texto):
     asyncio.run(_generar_async(texto))

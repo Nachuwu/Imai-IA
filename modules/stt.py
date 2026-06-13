@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 import numpy as np
-from modules.utils import sin_acentos as _sin_acentos
+from modules.utils import sin_acentos as _sin_acentos, MIC_LOCK
 import sounddevice as sd
 import scipy.io.wavfile as wav
 from faster_whisper import WhisperModel
@@ -82,7 +82,7 @@ def calibrar_umbral():
     _log.info("Calibrando micrófono... quédate en silencio")
     rmss = []
     try:
-        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
+        with MIC_LOCK, sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             for _ in range(n_chunks):
                 chunk, _ = stream.read(chunk_samples)
                 rmss.append(_rms(chunk))
@@ -151,7 +151,7 @@ def esperar_wake_word():
 def _esperar_oww():
     _log.info("En espera... di 'Imai' para activar (OWW)")
     try:
-        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
+        with MIC_LOCK, sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             while not _stop.is_set():
                 chunk, _ = stream.read(_OWW_CHUNK)
                 audio = chunk.flatten().astype(np.float32) / 32768.0
@@ -174,7 +174,7 @@ def _esperar_whisper():
 
     _log.info("En espera... di '%s' para activar", _WAKE_TARGET)
     try:
-        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
+        with MIC_LOCK, sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             while not _stop.is_set():
                 chunk, _ = stream.read(step_n)
                 chunk = chunk.flatten()
@@ -215,7 +215,7 @@ def escuchar():
     global nivel_audio
     print("[ Escuchando... ]", flush=True)
     try:
-        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
+        with MIC_LOCK, sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
             for _ in range(chunks_max):
                 if _stop.is_set():
                     break

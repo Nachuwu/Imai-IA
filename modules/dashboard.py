@@ -319,16 +319,24 @@ def api_comando():
     if not audio_bytes:
         return jsonify({"error": "sin audio"}), 400
     try:
-        texto, audio_mp3 = _api.procesar(audio_bytes)
+        texto, respuesta, audio_mp3 = _api.procesar(audio_bytes)
         resp = send_file(io.BytesIO(audio_mp3), mimetype="audio/mpeg")
         resp.headers["X-Texto"] = texto[:200] if texto else ""
+        resp.headers["X-Respuesta"] = respuesta[:200] if respuesta else ""
         return resp
     except Exception as e:
         _log.error("/api/comando error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
+_iniciado = False
+
+
 def iniciar(puerto=5000):
+    global _iniciado
+    if _iniciado:
+        return
+    _iniciado = True
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     threading.Thread(
         target=lambda: app.run(host="0.0.0.0", port=puerto, debug=False, use_reloader=False, ssl_context="adhoc"),

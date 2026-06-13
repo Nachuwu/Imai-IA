@@ -50,5 +50,7 @@ UMBRAL_RMS   = int(os.getenv("UMBRAL_RMS",   "300"))
 SILENCIO_MAX = float(os.getenv("SILENCIO_MAX", "1.5"))
 DURACION_MAX = int(os.getenv("DURACION_MAX",  "15"))
 
-AUDIO_FILE   = "audio/respuesta.mp3"
-TEMP_WAV     = "audio/temp.wav"
+_AUDIO_DIR   = os.path.join(_ROOT, "audio")
+os.makedirs(_AUDIO_DIR, exist_ok=True)
+AUDIO_FILE   = os.path.join(_AUDIO_DIR, "respuesta.mp3")
+TEMP_WAV     = os.path.join(_AUDIO_DIR, "temp.wav")

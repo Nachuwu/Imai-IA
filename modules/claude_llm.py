@@ -497,16 +497,15 @@ def consultar(historial, hablar_cb=None):
 
             if hablar_cb:
                 while True:
-                    for sep in ('.', '!', '?'):
-                        idx = buffer.find(sep)
-                        if idx != -1:
-                            oracion = buffer[:idx + 1].strip()
-                            buffer  = buffer[idx + 1:]
-                            if oracion:
-                                hablar_cb(oracion)
-                            break
-                    else:
+                    posiciones = [buffer.find(sep) for sep in ('.', '!', '?')]
+                    posiciones = [p for p in posiciones if p != -1]
+                    if not posiciones:
                         break
+                    idx = min(posiciones)
+                    oracion = buffer[:idx + 1].strip()
+                    buffer  = buffer[idx + 1:]
+                    if oracion:
+                        hablar_cb(oracion)
 
         final = stream.get_final_message()
 

@@ -1,6 +1,9 @@
 import json
 import os
+import logging
 from datetime import datetime
+
+_log = logging.getLogger(__name__)
 
 _CARPETA = os.path.join(os.path.dirname(__file__), "..", "historial")
 
@@ -18,5 +21,5 @@ def guardar(messages, intent=None, objeto=None, herramienta=False):
         }
         with open(archivo, "a", encoding="utf-8") as f:
             f.write(json.dumps(entrada, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("No se pudo guardar historial: %s", e)

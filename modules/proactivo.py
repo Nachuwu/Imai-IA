@@ -14,6 +14,7 @@ from datetime import datetime
 
 from config import DATA_DIR, CIUDAD, GMAIL_ENABLED
 import modules.telegram as tg
+from modules.utils import guardar_json
 
 _log = logging.getLogger(__name__)
 
@@ -65,8 +66,7 @@ def _cargar():
 
 def _guardar(estado):
     try:
-        with open(_ESTADO_FILE, "w", encoding="utf-8") as f:
-            json.dump(estado, f, ensure_ascii=False, indent=2)
+        guardar_json(_ESTADO_FILE, estado)
     except Exception:
         pass
 
@@ -169,6 +169,8 @@ def _check_correos():
         return
     try:
         import modules.gmail as gm
+        if not gm.token_disponible():
+            return
         correos = gm.get_correos_raw(n=5)
         if not correos:
             return

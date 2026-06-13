@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 from rapidfuzz import process as fuzz
 from config import DATA_DIR as _DATA_DIR
+from modules.utils import guardar_json
 
 _ARCHIVO = os.path.join(_DATA_DIR, "proyectos.json")
 _COL_PROY = None   # ChromaDB collection (lazy)
@@ -21,8 +22,7 @@ def cargar():
 
 
 def guardar(datos):
-    with open(_ARCHIVO, "w", encoding="utf-8") as f:
-        json.dump(datos, f, ensure_ascii=False, indent=2)
+    guardar_json(_ARCHIVO, datos)
 
 
 def _get_col():

@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from rapidfuzz import process as fuzz
+from modules.utils import guardar_json
 
 _log = logging.getLogger(__name__)
 
@@ -63,12 +64,11 @@ def _cargar_cache():
 
 def _guardar_cache(indice, exe_indice):
     try:
-        with open(_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "timestamp": time.time(),
-                "indice":     indice,
-                "exe_indice": exe_indice,
-            }, f, ensure_ascii=False)
+        guardar_json(_CACHE_FILE, {
+            "timestamp": time.time(),
+            "indice":     indice,
+            "exe_indice": exe_indice,
+        })
     except Exception:
         pass
 

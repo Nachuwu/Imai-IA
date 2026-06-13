@@ -29,6 +29,12 @@ def _disponible():
     return GMAIL_ENABLED and os.path.exists(_CREDS_FILE)
 
 
+def token_disponible():
+    """True si ya hay un token guardado. Evita iniciar un flujo OAuth interactivo
+    (run_local_server) desde un hilo de fondo cuando aún no se ha autenticado."""
+    return os.path.exists(_TOKEN_FILE)
+
+
 def _get_service():
     global _service
     if _service is not None:
